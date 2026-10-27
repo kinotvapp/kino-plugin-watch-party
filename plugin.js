@@ -56,6 +56,7 @@ export const LIMITS = {
   linkMs: 5 * 60000, // a TV's link QR
   snapEveryMs: 10000,
   noAnswerMs: 10000, // the host silent this long: say so, offer to try again
+  awayMaxMs: 120000, // the host silent while its door answers (Kino in the background): a soft notice this long, then noAnswer
   aloneMs: 30000, // a host whose members all left this long ago may look for the room elsewhere
   stateEveryMs: 2500,
   refreshMs: 3000, // the panel's own refresh while in a room
@@ -777,7 +778,7 @@ export function newParty(name = "") {
     outbox: [], jobs: [], sent: [], replies: {}, chatTimes: {}, myChat: [], cursors: { joined: 0, hosted: 0, probe: 0 }, hereAt: 0,
     st: null, stAt: 0, skew: [], follow: true, hold: false, lastAction: 0, expect: null, seeks: [], lead: 0, seekPending: null, stuck: false,
     snapSeq: 0, snapAt: 0, lastSnapSent: 0, lastStateSent: 0, snapDue: false, forceState: null,
-    banner: null, lastOkAt: 0, hostFailed: false, hostFailedAt: 0, awaiting: null, gone: [], probe: null, moved: null, aloneSince: 0,
+    banner: null, lastOkAt: 0, doorUp: false, hostFailed: false, hostFailedAt: 0, awaiting: null, gone: [], probe: null, moved: null, aloneSince: 0,
     realLeftAt: 0, lobby: {}, lobbyHello: {}, lobbySent: {}, lobbySentAt: [], recovering: false, askedMid: null,
     oldView: null, link: null, pending: null, pairs: {}, closeJoined: null, closeHosted: false, expiresAtMs: 0, redirect: null,
     correctedAt: 0, correctedTo: null, notes: [], short: null, shortUntil: 0, shortError: false, shortMine: false,
@@ -1158,7 +1159,7 @@ function applySnapshot(p, s, now) {
   const mine = rosterOf(p, p.me.mid);
   if (mine) p.myJs = mine.js;
   if (mine && mine.role === "display") p.me.of = mine.of;
-  if (p.banner && ["newHost", "noAnswer", "dropped", "cantCheck", "waitOthers", "takeOver", "lost", "redirect"].includes(p.banner.kind)) p.banner = null;
+  if (p.banner && ["newHost", "noAnswer", "hostAway", "dropped", "cantCheck", "waitOthers", "takeOver", "lost", "redirect"].includes(p.banner.kind)) p.banner = null;
   p.redirect = null;
   p.awaiting = null;
   p.hostFailed = false;
@@ -1300,7 +1301,14 @@ export function guestTick(p, ctx, now) {
       }
     }
   }
-  if (!p.banner && p.handle && !p.awaiting && now - p.lastOkAt > LIMITS.noAnswerMs) p.banner = { kind: "noAnswer" };
+  // The host silent: while its door still answers (its Kino in the background closed its tab, nothing more), a soft notice for
+  // up to LIMITS.awayMaxMs, with no retry and no failover; then, or at once when the door itself does not answer, noAnswer.
+  const silentFor = now - p.lastOkAt;
+  if (!p.handle || p.awaiting || silentFor <= LIMITS.noAnswerMs) {
+    if (p.banner && p.banner.kind === "hostAway") p.banner = null;
+  } else if (p.doorUp && silentFor <= LIMITS.awayMaxMs) {
+    if (!p.banner) p.banner = { kind: "hostAway" };
+  } else if (!p.banner || p.banner.kind === "hostAway") p.banner = { kind: "noAnswer" };
 }
 
 // ---------- the TV's link endpoint ----------
@@ -1459,10 +1467,13 @@ async function drain(room, p, session, cursor, onEvent, now) {
     try {
       box = await room.inbox({ since: p.cursors[cursor], session });
     } catch (e) {
+      if (cursor === "joined" && codeOf(e) === "room_unreachable") p.doorUp = false;
       if (codeOf(e) === "room_closed") return "closed";
       return "error";
     }
     if (!isObj(box) || !Array.isArray(box.events)) return "error";
+    // Whether the host's door itself answers (Kino keeps it serving while the host's app is in the background).
+    if (cursor === "joined") p.doorUp = box.reachable === true;
     for (const ev of box.events) onEvent(p, ev, now);
     if (Number.isFinite(box.last)) p.cursors[cursor] = Math.max(p.cursors[cursor], box.last);
     if (!box.more) return "ok";
@@ -1820,6 +1831,8 @@ function partyBanner(p, now) {
       return Banner("info", both(`Entraste por otra puerta. Entra con el anfitrión, ${displayName(b.name)}.`, `You came in through another door. Join the host, ${displayName(b.name, true)}.`), Action(tx("enter"), busyTap("redirect")));
     case "dropped":
       return Banner("warning", both("Estuviste fuera un rato y la sala te sacó. Vuelve a entrar.", "You were away for a while and the room let you go. Join again."), Action(tx("enter"), busyTap("retryHost")));
+    case "hostAway":
+      return Banner("info", both("El anfitrión salió un momento; la sala sigue abierta.", "The host stepped away; the room is still open."));
     case "noAnswer":
       return Banner("warning", both("El anfitrión no responde. Puede ser tu conexión o la suya.", "The host is not answering. It may be your connection or theirs."), Action(tx("retry"), busyTap("retryHost")));
     case "cantCheck":

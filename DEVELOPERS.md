@@ -44,7 +44,7 @@ always with the same key: Kino refuses an update signed by another one.
 ## How it works
 
 <!-- sync:begin example-readme -->
-_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `4bf80a00a`. Do not edit by hand: change the example and sync again._
+_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `4f1586cb2`. Do not edit by hand: change the example and sync again._
 
 ### What Kino asks the person (the red lines are Kino's)
 
@@ -102,6 +102,12 @@ Ajustes. The plugin cannot word or hide them:
   itself): every member runs the same **election** on the host's last snapshot: the seat with the lowest joining order that
   holds a door. Nobody votes. The successor takes over at once; everybody else sees «El anfitrión se fue: Bea es el nuevo
   anfitrión» with **one button** that joins Bea's door.
+- **The host only stepped out of Kino:** Kino closes a tab when its app leaves the front, so the host's tab stops sending,
+  but its door keeps answering (Kino keeps it serving for a while) and its tab never says goodbye (only «Salir de la sala»
+  does). While the guest's mailbox says the door is reachable, the host's silence shows a soft notice, «El anfitrión salió
+  un momento; la sala sigue abierta», with no button, no retry and no failover, for up to 2 minutes (the host's own
+  2-minute member drop); after that, or at once when the door itself does not answer, the path below. When the host
+  comes back, Kino reopens its tab on the same room and its next round sends a snapshot at once: the notice clears.
 - **The host only stops answering:** nothing is concluded from silence, because a guest cannot tell its own outage from the
   host's. After 10 s the tab says «El anfitrión no responde. Puede ser tu conexión o la suya» with «Reintentar». That press
   first tries the host's door again, fresh: if it answers, nothing happened. Only if it fails are the doors tried in the

@@ -23,6 +23,9 @@
   - creating or joining opens the chat on its input;
   - sending and reacting bring it back there;
   - errors focus **Try again**, and recovery screens focus their main button.
+- **A host who steps out of Kino is not "gone":** while the host's room still answers, guests see "The host stepped away;
+  the room is still open" for up to 2 minutes instead of "The host is not answering". The room catches up as soon as the
+  host is back.
 
 ## 1.0.0
 

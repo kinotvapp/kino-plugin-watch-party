@@ -182,6 +182,8 @@ Each red permission can be switched off later in the plugin's tab in Kino's Sett
 - **The video does not follow**: check that you play the same title with the same plugin, that **Follow the host** (in
   the Room tab) is on, and that **Let it pause and move my video** is on in Settings. The **Sync** icon at the top asks
   the host now.
+- **"The host stepped away; the room is still open"**: the host left Kino for a moment (its room still answers). Keep
+  watching and chatting: it clears when the host is back. After 2 minutes it becomes "The host is not answering".
 - **"The host is not answering"**: it may be your connection or theirs. **Try again** first tries the host again, and only
   then the backup doors.
 - **The party stopped when I closed the panel**: pin the panel (see above).

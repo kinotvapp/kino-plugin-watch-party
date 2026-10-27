@@ -774,6 +774,48 @@ export function contributesPanel(manifest) {
   return manifest.panel?.contributes === true && (manifest.capabilities || []).includes(CONTRIBUTES.capability);
 }
 
+// ---------- Task 11: the player panel on a live channel ----------
+
+const LIVE = contract.kinoLivePanel;
+
+/** The content kinds [manifest]'s contributed tab joins (`panel.kinds`, default ["title"]); empty when it contributes none. */
+export function contributedKinds(manifest) {
+  if (!contributesPanel(manifest)) return [];
+  return Array.isArray(manifest.panel.kinds) ? manifest.panel.kinds : [...CONTRIBUTES.kinds.default];
+}
+
+/** Whether [manifest]'s contributed tab joins an En vivo channel's panel (`"kinds"` holds "live"). */
+export function contributesLive(manifest) {
+  return contributedKinds(manifest).includes(LIVE.kind);
+}
+
+/**
+ * The context a tab gets on an En vivo channel (the app's PanelContextJson live shape), exactly contract
+ * `kinoLivePanel.contextFields`: the channel `{ provider, code, name }`, `foreign: true`, the provider as `source`, and the
+ * session's own parts taken from [base] (device, lang, tab, values, features; in screen mode state and size).
+ */
+export function liveContext(channel, base = {}, sourceName = channel.provider) {
+  const out = {
+    kind: LIVE.kind, live: true, channel: { provider: channel.provider, code: channel.code, name: channel.name ?? channel.code },
+    foreign: true, source: { pluginId: channel.provider, name: sourceName },
+    device: base.device ?? "tv", lang: base.lang ?? "es-CO", values: base.values ?? { video: {}, plugin: {} },
+  };
+  if (base.tab !== undefined) out.tab = base.tab;
+  if (base.features !== undefined) out.features = base.features;
+  for (const k of LIVE.screenContextAdds) if (base[k] !== undefined) out[k] = base[k];
+  return out;
+}
+
+/** What the app drops of a live tab's answer [answer]: its whole `player` (live_channel) and, as any contributed tab, go.title/play. */
+export function liveAnswerDrops(answer) {
+  const out = [];
+  if (!answer || typeof answer !== "object") return out;
+  if (answer.player !== undefined && answer.player !== null) out.push(LIVE.playerDroppedLog.replace(/^panel: /, ""));
+  const g = answer.go;
+  if (g && typeof g === "object") for (const k of CONTRIBUTES.goDropped) if (g[k] !== undefined) out.push(`go.${k}: a contributed panel never opens a plugin's title, dropped`);
+  return out;
+}
+
 // ---------- Task 8j: who may move the player (PlayerControlRules, contract.kinoPlayerControl) ----------
 
 const CONTROL = contract.kinoPlayerControl;

@@ -36,6 +36,7 @@ function kitFetch(svc = createShortService()) {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIR = pjoin(HERE, "..");
 const PLUGIN = pjoin(DIR, "plugin.js");
+const PLUGIN_SOURCE = readFileSync(PLUGIN, "utf8");
 const MANIFEST_TEXT = readFileSync(pjoin(DIR, "kino-plugin.json"), "utf8");
 const MANIFEST = JSON.parse(MANIFEST_TEXT);
 const quiet = { log() {}, info() {}, warn() {}, error() {} };
@@ -2068,4 +2069,43 @@ test("the emoji palette on phone and TV: hidden until the toggle, the toggle sho
     assert.equal(after.root.children.find((n) => n.key === "emojiPalette").hidden, true, "still hidden after a reaction");
     assert.equal(bubblesOf(rawChat(after)).at(-1).text, (await P()).EMOJIS[2], "the reaction is in the list");
   }
+});
+
+test("the host steps out of Kino (its tab closed, its door still answering): a soft notice for up to 2 minutes, no retry, no failover; back at once on its return", async () => {
+  let { host, guests: [bea, caro], t } = await room(["Bea", "Caro"]);
+  const epoch = party(bea).epoch;
+  // The host's Kino goes to the background: its tab runs no more (no panel calls), its door keeps answering.
+  t = await rounds([bea, caro], t, 20); // 60 s
+  for (const d of [bea, caro]) {
+    const p = party(d);
+    assert.equal(p.banner && p.banner.kind, "hostAway", d.id);
+    assert.equal(p.hostFailed, false, "no failover");
+    assert.equal(p.epoch, epoch, "no change of host");
+    const { raw } = await panel(d, t);
+    assert.ok(!(await P()).recoveryScreen(p), "the chat stays: not a recovery screen");
+    assert.ok(all(raw.root).some((n) => n.type === "MaterialBanner" && n.text === "El anfitrión salió un momento; la sala sigue abierta." && !n.action), "a soft notice, no retry");
+    assert.ok(all(raw.root).some((n) => n.key === "chatText"));
+  }
+  // Nothing in the room says the host left: its tab closing sends no goodbye (a «bye» would have set hostFailed above), and
+  // the plugin sends one only from «Salir de la sala» (and a TV moving to another phone's room).
+  assert.equal(PLUGIN_SOURCE.match(/enqueue\([^;]*\{ t: "bye" \}\)/g).length, 2);
+  // The host's tab comes back (Kino reopens the panel): the same room, and a snapshot at once; the guests recover.
+  const seq = party(bea).snap.seq;
+  await panel(host, t);
+  assert.equal(party(host).phase, "party");
+  t = await rounds([bea, caro], t + 100, 1);
+  for (const d of [bea, caro]) {
+    assert.equal(party(d).banner, null, `${d.id}: the notice cleared`);
+    assert.ok(party(d).snap.seq > seq, `${d.id}: a fresh snapshot`);
+  }
+});
+
+test("the host silent for more than 2 minutes with its door answering: the normal «no responde» path; a door that does not answer: at once", async () => {
+  const { guests: [bea], t } = await room(["Bea"]);
+  await rounds([bea], t, 45, 3000); // 135 s
+  assert.equal(party(bea).banner.kind, "noAnswer");
+  const r2 = await room(["Bea"]);
+  r2.net.down.add(party(r2.host).hostWords);
+  await rounds([r2.guests[0]], r2.t, 5);
+  assert.equal(party(r2.guests[0]).banner.kind, "noAnswer", "the door itself is down: no soft notice");
 });

@@ -391,6 +391,7 @@ const GO_FIELDS = {
   titleByIds: `\`{ titleByIds: { ${S.goTitleByIds.fields.join(", ")} } }\``,
   url: `\`{ url: { ${S.goUrl.fields.join(", ")} } }\``,
   copy: `\`{ copy: { ${S.goCopy.fields.join(", ")} } }\``,
+  liveChannel: `\`{ liveChannel: { ${S.goLiveChannel.fields.join(", ")} } }\``,
 };
 const GO_OPENS = {
   title: "this plugin's title page",
@@ -404,8 +405,9 @@ const GO_OPENS = {
   titleByIds: "Kino's own title page for TMDB or IMDb ids, with every source the person has",
   url: "an https link in the browser, after Kino's own sheet (a QR code on a TV)",
   copy: `Kino copies \`text\` (at most ${S.goCopy.maxTextChars} characters, ${S.goCopy.maxLines} lines) and shows its own «Copiado» toast; a TV cannot`,
+  liveChannel: "tunes the player to an En vivo provider's channel (only for a plugin whose player tab joins live channels)",
 };
-const goFrom = (g) => g === "titleByIds" || g === "url" || g === "copy"
+const goFrom = (g) => g === "titleByIds" || g === "url" || g === "copy" || g === "liveChannel"
   ? `only the person's own ${S.goUrl.fromTriggers.join(" or ")}`
   : g === "screen" ? "a tap or an answer, `open`'s included" : "a tap or an event's answer (never `open`'s, a timer's or an `onClose`'s)";
 

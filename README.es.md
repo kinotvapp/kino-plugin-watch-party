@@ -188,6 +188,9 @@ Cada permiso en rojo se puede apagar después en la pestaña del plugin en Ajust
 - **El video no sigue**: revisa que reproduces el mismo título con el mismo plugin, que **Seguir al anfitrión** (en la
   pestaña Sala) está encendido y que **Dejar que pause y mueva mi video** está encendido en Ajustes. El ícono de
   **Sincronizar** arriba le pregunta al anfitrión ya mismo.
+- **«El anfitrión salió un momento; la sala sigue abierta»**: el anfitrión salió de Kino un momento (su sala sigue
+  respondiendo). Sigue viendo y chateando: el aviso se quita cuando vuelve. A los 2 minutos pasa a «El anfitrión no
+  responde».
 - **«El anfitrión no responde»**: puede ser tu conexión o la suya. **Reintentar** prueba primero con el anfitrión y solo
   después con las puertas de respaldo.
 - **La fiesta se detuvo al cerrar el panel**: fija el panel (mira arriba).
