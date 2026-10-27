@@ -51,10 +51,6 @@
 //   <source plugin id>[:<name>] makes every panel, panelAction and playerEvent context the app's foreign one (an opaque ref,
 //   foreign: true, source: { pluginId, name }, no copy label, no autoNext) and says what the app drops of the answer.
 //   node sdk/run.mjs --foreign latino:Latino <plugin dir> panel <the owner's ref>
-// The same tab on an En vivo channel (Task 11, "kinds": ["live"]): --live-channel <provider>:<code>[:<name>] makes every panel
-//   and panelAction context the app's live one ({ kind: "live", live: true, channel, foreign, source }, no position, no ref),
-//   drops every player action (live_channel) and refuses playerEvent (Kino sends none on live). The ref argument is ignored.
-//   node sdk/run.mjs --live-channel tdt:la1:La 1 <plugin dir> panel -
 // Who may move the player (Task 8j, contract.kinoPlayerControl): every panel export's `player` is sifted as the app does, by its
 //   origin (panel: the result's own, panelAction: the trigger, playerEvent: the event) and the playerControl capability (granted
 //   when the manifest declares it, unless KINO_PLAYER_CONTROL_REVOKED=1); what is dropped is printed, and so is the notice Kino
@@ -111,12 +107,12 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { checkOutput, checkSettingsOutput, contract, featureApiVersion, liveChannelGoOf, liveChannelGoRefusal, markSearchHits, maskSetPasswords, readRangeProblem, segmentSkip, validateManifest } from "./contract.mjs";
+import { checkOutput, checkSettingsOutput, contract, featureApiVersion, markSearchHits, maskSetPasswords, readRangeProblem, segmentSkip, validateManifest } from "./contract.mjs";
 import { contrast, formatRatio, resolvePalette } from "./palette.mjs";
 import { askImage, askRead, createKino, errorReport, signingLane } from "./kino-shim.mjs";
 import { loadPlugin, missingGlobalLines, scanMissingGlobals } from "./sandbox.mjs";
 import { kitScreenCall } from "./kit-call.mjs";
-import { actionEvent, checkPanelOutput, contributesLive, contributesPanel, fakeContext, foreignAnswerDrops, foreignContext, foreignEventDetail, gatePlayer, langOf, liveAnswerDrops, liveContext, panelPlayerOf, PLAYER_EVENTS, playerNotice, siftPlayer, TRIGGERS } from "./panel.mjs";
+import { actionEvent, checkPanelOutput, contributesPanel, fakeContext, foreignAnswerDrops, foreignContext, foreignEventDetail, gatePlayer, langOf, panelPlayerOf, PLAYER_EVENTS, playerNotice, siftPlayer, TRIGGERS } from "./panel.mjs";
 import { answerFields, checkPanelScreen, checkPanelScreenAnswer, checkScreenAnswer, checkScreenTree, fakePanelScreenContext, fakeScreenContext, fakeScreenEvent, isPanelScreen, LIMITS as SCREEN_LIMITS, PANEL_SCREEN, panelAnswerFields, printScreenTree } from "./screen.mjs";
 import { channelLines, download, guideFor, keepStart, loadPlaylist, summarisePlaylist, summaryLines } from "./live-playlist.mjs";
 import { jobBudget, jobContext, jobKino, runJob } from "./job.mjs";
@@ -152,7 +148,6 @@ const USAGE = "usage: node sdk/run.mjs [--config k=v] [--record f | --replay f] 
   + "       node sdk/run.mjs [--context '<json>'] <plugin folder> <panel <ref> [tab] | panelAction <ref> <key> <press|change|submit|tab|open> ['<value json>'] ['<values json>'] | playerEvent <ref> <type> ['<detail json>']>\n"
   + "       node sdk/run.mjs [--context '<json>'] [--state '<json>'] --screen <plugin folder> panelAction <ref> <name> <press|change|submit> ['<value json>'] ['<arg>']\n"
   + "       node sdk/run.mjs --foreign <source plugin id>[:<name>] <plugin folder> <panel | panelAction | playerEvent> <ref> ...\n"
-  + "       node sdk/run.mjs --live-channel <provider>:<code>[:<name>] <plugin folder> <panel | panelAction> - ...\n"
   + "       node sdk/run.mjs [--context '<json>'] [--state '<json>'] <plugin folder> <screen | screenEvent <name> [arg] ['<value json>'] [--trigger tap|change|submit]>\n"
   + "       node sdk/run.mjs [--size <bytes>] <plugin folder> read <handle> <offset> <length>   (byteSource: one range, as Kino's proxy asks it)\n"
   + "       node sdk/run.mjs [--out <file>] <plugin folder> image <handle>   (imageSource: the picture, written to a file)\n"
@@ -218,7 +213,7 @@ function fail(message) {
 }
 
 export function parseArgs(argv) {
-  const opts = { config: {}, record: null, replay: null, raw: false, epg: null, live: false, retry: null, within: null, context: null, state: null, device: null, size: null, out: null, screen: false, foreign: null, liveChannel: null, trigger: null };
+  const opts = { config: {}, record: null, replay: null, raw: false, epg: null, live: false, retry: null, within: null, context: null, state: null, device: null, size: null, out: null, screen: false, foreign: null, trigger: null };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -238,15 +233,6 @@ export function parseArgs(argv) {
       const pluginId = colon < 0 ? v : v.slice(0, colon);
       if (!new RegExp(contract.manifest.idPattern).test(pluginId)) throw new Error("--foreign needs the id of the plugin whose title plays (and :<name>)");
       opts.foreign = { pluginId, name: colon < 0 ? pluginId : v.slice(colon + 1) };
-    }
-    else if (a === "--live-channel") {
-      // Task 11: the En vivo channel on screen, as the provider plugin lists it: the context is a live tab's.
-      const [provider, code, ...name] = (argv[++i] || "").split(":");
-      const L = contract.manifest.screen.goLiveChannel;
-      if (!new RegExp(L.providerPattern).test(provider || "") || !new RegExp(L.codePattern).test(code || "")) {
-        throw new Error("--live-channel needs <provider plugin id>:<channel id>[:<name>]");
-      }
-      opts.liveChannel = { provider, code, name: name.length ? name.join(":") : code };
     }
     else if (a === "--size") {
       const n = Number(argv[++i]);
@@ -413,30 +399,19 @@ async function main() {
       if (opts.foreign && !contributesPanel(manifest)) {
         return fail(`--foreign: the manifest does not declare "panel": { "contributes": true } with the "${contract.manifest.panel.contributes.capability}" capability: Kino adds no tab of this plugin to other plugins' titles`);
       }
-      if (opts.liveChannel && !contributesLive(manifest)) {
-        return fail(`--live-channel: the manifest's contributed panel does not declare "kinds": ["live"] (with "contributes": true and the "${contract.manifest.panel.contributes.capability}" capability): Kino adds no tab of this plugin to an En vivo channel`);
-      }
-      if (opts.liveChannel && fn === "playerEvent") return fail("--live-channel: Kino sends no playerEvent on an En vivo channel (there is no plugin title to feed it)");
-      if (opts.liveChannel && opts.foreign) return fail("--live-channel and --foreign do not go together");
       const foreign = opts.foreign ? { contributorId: manifest.id, ...opts.foreign } : null;
-      try { request = panelRequest(fn, rest.length ? rest : ["-"], opts.context, { apiVersion: manifest.apiVersion, screen: opts.screen, state: opts.state, foreign, liveChannel: opts.liveChannel }); } catch (e) { return fail(e.message); }
+      try { request = panelRequest(fn, rest, opts.context, { apiVersion: manifest.apiVersion, screen: opts.screen, state: opts.state, foreign }); } catch (e) { return fail(e.message); }
       // Task 8p: a screen-mode panelAction runs as the app marks it: the person's press for a press or submit trigger.
       const answer = fn === "panelAction" && opts.screen
         ? await kitScreenCall.run({ press: contract.qr.screenTriggers.includes(request.event.trigger), tick: false }, () => callPanel(plugin, fn, request))
         : await callPanel(plugin, fn, request);
       saveTape();
-      // Task 11: on a live channel every player action is dropped whole, and go.title/play as for any contributed tab.
-      if (opts.liveChannel && answer && typeof answer === "object") {
-        for (const line of liveAnswerDrops(answer)) stderr(`· dropped: ${line}`);
-        liveChannelGoLine(answer.go, manifest, fn === "panelAction" ? request.event.trigger : "refresh");
-        if (!opts.raw) delete answer.player;
-      }
       // A contributed panel's answer: what the app drops of it (go.title/play; its player is sifted below).
       if (foreign && fn !== "panel" && answer && typeof answer === "object") {
         for (const line of foreignAnswerDrops({ ...answer, player: undefined }, fn === "panelAction" ? request.event.trigger : null)) stderr(`· dropped: ${line}`);
       }
       // Task 8j: who may move the player, by origin and the playerControl capability.
-      if (!opts.liveChannel) playerControlLines(fn, answer, request, { contributed: !!foreign, manifest });
+      playerControlLines(fn, answer, request, { contributed: !!foreign, manifest });
       if (opts.raw) { process.stdout.write(JSON.stringify(answer === undefined ? null : answer, null, 2) + "\n"); return 0; }
       return printPanelAnswer(fn, answer, request.context, servers, { apiVersion: manifest.apiVersion, screen: opts.screen, settings: manifest.settings });
     }
@@ -658,10 +633,8 @@ export function segmentsArg(rest) {
  * `<ref> <type> ['<detail json>']` for playerEvent (event `{ type, ...detail }`: the app puts the detail's keys flat).
  * [over] (`--context`) is merged over the fake context. Throws on a bad argument.
  */
-export function panelRequest(fn, rest, over = null, { apiVersion = 0, screen = false, state = null, foreign = null, liveChannel = null } = {}) {
+export function panelRequest(fn, rest, over = null, { apiVersion = 0, screen = false, state = null, foreign = null } = {}) {
   const r = panelRequestOf(fn, rest, over, { apiVersion, screen, state });
-  // Task 11: a tab on an En vivo channel: the live context (PanelContextJson's live shape), the session's own parts kept.
-  if (liveChannel) return { ...r, context: liveContext(liveChannel, r.context) };
   if (!foreign) return r;
   // Task 8k: the context a contributed panel gets for another plugin's title (PanelForeign.applyTo).
   const out = { ...r, context: foreignContext(r.context, foreign.contributorId, { pluginId: foreign.pluginId, name: foreign.name }) };
@@ -801,24 +774,6 @@ function copyGoLine(go) {
 }
 
 /**
- * Task 11: what the app does with a `go.liveChannel` in [go] (raw or kept) from [manifest]'s plugin for an event of [trigger]:
- * refused (said, false) without the person's press or a contributed tab that joins live channels; else Kino tunes (true).
- */
-function liveChannelGoLine(go, manifest, trigger) {
-  if (!go || typeof go !== "object" || go.liveChannel === undefined) return false;
-  const g = liveChannelGoOf(go.liveChannel, () => {});
-  if (!g) return false;
-  const why = liveChannelGoRefusal(manifest, trigger);
-  if (why !== null) {
-    const said = why === "not_press" ? "only the person's own tap or submit tunes a channel" : 'the plugin\'s contributed panel must declare "kinds": ["live"] (with the playerPanelTab capability)';
-    stderr(`· dropped: go.liveChannel (${why}): ${said}`);
-    return false;
-  }
-  stderr(`· go.liveChannel: Kino tunes to ${g.provider}:${g.code} (an installed, usable En vivo provider that is not 18+ while locked; an 18+ channel fails closed: not found); in the player panel on a live channel it changes in place, elsewhere the player opens it`);
-  return true;
-}
-
-/**
  * Task 8s: what the app does with a kept `go.url` [go]: nothing opens by itself. Kino asks the person in its own sheet (its
  * heading, your plugin's name, the host), only after their tap or submit and within 5 s of it, at most one link a second and
  * 10 a minute; a TV shows a QR code. Fix round 1 (M1): the screen [answer]'s own pop-ups and `open` operations beside it are
@@ -884,8 +839,6 @@ function printScreenAnswer(fn, answer, context, manifest, writeConfig = () => {}
   const checked = checkScreenAnswer(answer, lang, opts);
   checked.dropped.forEach((d) => stderr(`· dropped: ${d}`));
   if (!checked.answer) { stderr("✗ the answer is invalid: Kino ignores it"); return 1; }
-  // Task 11: a go.liveChannel: honoured only after the person's own tap or submit, for a plugin whose tab joins live channels.
-  if (checked.answer.go?.liveChannel && !liveChannelGoLine(checked.answer.go, manifest, event ? (event.trigger === "tap" ? "press" : event.trigger) : "open")) delete checked.answer.go;
   // As the app (Task 8m, 8s): a change's go.titleByIds or go.url is dropped; only the person's own tap opens one.
   const go = checked.answer.go;
   if (event && event.trigger === "change" && go && (go.titleByIds || go.url)) {

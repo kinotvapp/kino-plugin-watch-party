@@ -1862,8 +1862,9 @@ function isMine(p, e) {
 }
 
 /** One message's bubble: mine filled with the primary colour, the others' a filled (neutral) card; a reaction is a glyph. */
-function bubble(e, mine) {
-  if (e.k === "emoji") return Text(both(e.x, e.x), { style: "h4" });
+function bubble(e, mine, tv) {
+  // A reaction: the glyph alone, clearly large (h2; a step smaller on a TV, where every style grows by 1.25).
+  if (e.k === "emoji") return Text(both(e.x, e.x), { style: tv ? "h3" : "h2" });
   return {
     type: "Card", borderRadius: "large", padding: { x: 12, y: 8 },
     ...(mine ? { color: "primary" } : { variant: "filled" }),
@@ -1893,7 +1894,7 @@ function chatList(p, now, ctx) {
     type: "Column", key: "g" + g.entries[0].c, fill: true, gap: 4, ...side(g.mine),
     children: [
       ...(g.mine ? [] : [Text(both(displayName(g.entries[0].n), displayName(g.entries[0].n, true)), { style: "caption", color: "muted" })]),
-      ...g.entries.map((e) => bubble(e, g.mine)),
+      ...g.entries.map((e) => bubble(e, g.mine, isTv(ctx))),
     ],
   }));
   const pending = pendingOwn(p, now);
@@ -1928,7 +1929,13 @@ function chatTab(p, now, ctx) {
   // lines of four, under the list (which keeps the room left), never pushing it off screen.
   children.push({
     type: "Row", key: "emojiPalette", wrap: true, gap: 4, ...(display ? {} : { hidden: true }),
-    children: EMOJIS.map((e, i) => ({ type: "TextButton", key: "emoji" + i, labelText: e, onPressed: display ? "emoji" : { ui: [{ hide: "emojiPalette" }], event: "emoji" }, arg: String(i), span: 3 })),
+    // Each reaction a pressable card around a large glyph (h3; h4 on a TV, where styles grow by 1.25), at least 48 dp tall. The
+    // reaction's index travels in the action itself: with an action object Kino reads `arg` from the object, never the node's.
+    children: EMOJIS.map((e, i) => ({
+      type: "Card", key: "emoji" + i, variant: "outlined", span: 3, minHeight: 48, padding: 4, crossAxisAlignment: "center",
+      onTap: display ? { event: "emoji", arg: String(i) } : { ui: [{ hide: "emojiPalette" }], event: "emoji", arg: String(i) },
+      children: [Text(both(e, e), { style: isTv(ctx) ? "h4" : "h3" })],
+    })),
   });
   if (!display) {
     // The field sends on the keyboard's own action (onSubmitted) and on its own send icon inside the field (onTrailingTap; its
@@ -2398,7 +2405,7 @@ export function focusables(root) {
   const out = [];
   const walk = (n) => {
     if (!isObj(n)) return;
-    if (typeof n.key === "string" && !n.key.startsWith("busy.") && !n.hidden && ["TextField", "ElevatedButton", "TextButton", "Button", "IconButton", "Switch"].includes(n.type)) out.push(n.key);
+    if (typeof n.key === "string" && !n.key.startsWith("busy.") && !n.hidden && (["TextField", "ElevatedButton", "TextButton", "Button", "IconButton", "Switch"].includes(n.type) || (n.type === "Card" && n.onTap))) out.push(n.key);
     for (const c of Array.isArray(n.children) ? n.children : []) walk(c);
     if (Array.isArray(n.items)) for (const c of n.items) walk(c);
   };

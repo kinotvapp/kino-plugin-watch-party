@@ -5,7 +5,7 @@
 // invalid node, style value, action or field is dropped with a reason. Like panel.mjs it reads the answer the way org.json
 // does (the answer crosses to Kino as JSON), and like the Kotlin it walks a JSON object's keys SORTED wherever the walk
 // can log, so the lines come out in the same order. plugins/sdk/test/screen-cases.json is the case table both sides share.
-import { contract, isUserServer, javaDouble, screenGoOf, screenItems, titleByIdsOf, urlGoOf, copyGoOf, liveChannelGoOf } from "./contract.mjs";
+import { contract, isUserServer, javaDouble, screenGoOf, screenItems, titleByIdsOf, urlGoOf, copyGoOf } from "./contract.mjs";
 import { cappedLog, httpsImage, panelAccentOf, panelMessageOf, panelPlayerOf, panelRefreshOf, panelTabsOf } from "./panel.mjs";
 
 // ---------- limits and name tables (ScreenLimits, ScreenWidgets; numbers come from the contract file) ----------
@@ -1735,7 +1735,7 @@ class Reader {
     return k === null ? null : { [op]: k };
   }
 
-  /** Exactly one of the twelve go shapes, logged under [where] when it is not. */
+  /** Exactly one of the eleven go shapes, logged under [where] when it is not. */
   goOf(o, where) {
     const keys = Object.keys(o);
     const k = keys.length === 1 && GO_KEYS.includes(keys[0]) ? keys[0] : null;
@@ -1757,10 +1757,6 @@ class Reader {
     if (k === "copy") {
       const g = copyGoOf(v, (why) => this.log(`${where} go.copy ${why}, dropped`));
       return g === null ? null : { copy: g };
-    }
-    if (k === "liveChannel") {
-      const g = liveChannelGoOf(v, (why) => this.log(`${where} go.liveChannel ${why}, dropped`));
-      return g === null ? null : { liveChannel: g };
     }
     if (k === "section" || k === "categories" || k === "close") return v === true ? { [k]: true } : bad("must be true");
     if (!isObj(v)) return bad("is not an object");

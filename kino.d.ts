@@ -790,13 +790,6 @@ interface KinoManifestPanel {
    * from any origin, and `pause` and `speed` too); `go.title` / `go.play` are dropped.
    */
   contributes?: boolean;
-  /**
-   * apiVersion 14 (Task 11), only with `contributes: true`: which content your tab joins. "title": a plugin's title (the rule
-   * above); "live": an En vivo channel, after Kino's own «General» tab, with `context.kind === "live"` (`KinoLivePanelContext`:
-   * the channel, never a position) and `go.liveChannel` to tune. Default `["title"]`; a non-empty list of these two (an
-   * unknown value or an empty list refuses the install).
-   */
-  kinds?: ("title" | "live")[];
 }
 
 /**
@@ -984,21 +977,7 @@ type KinoScreenGo =
   | { screen: KinoScreenOpen }
   | { titleByIds: KinoScreenTitleByIds }
   | { url: KinoScreenUrl }
-  | { copy: KinoScreenCopy }
-  | { liveChannel: KinoScreenLiveChannel };
-
-/**
- * `go: { liveChannel: { provider, code } }` (Task 11, apiVersion 14, the twelfth shape): Kino tunes the player to the channel
- * `code` (an item id, 1 to 128 of `A-Z a-z 0-9 . _ ~ -`) of the En vivo provider plugin `provider` (a plugin id, never `own`).
- *
- * - Only for a plugin whose approved contributed tab declares `"kinds": ["live"]` (else dropped, logged `needs_live_tab`), and
- *   only after the person's own tap or press (as `go.url` and `go.copy`).
- * - The provider must be installed, usable and list live channels; an 18+ provider only while the 18+ code is unlocked; an
- *   18+ channel is not found while it is locked (Kino's usual message).
- * - From the player panel on a live channel the channel changes in place (the panel and its pin stay); from anywhere else the
- *   panel or screen closes and the player opens the channel. Nothing comes back: the next context says the channel.
- */
-type KinoScreenLiveChannel = { provider: string; code: string };
+  | { copy: KinoScreenCopy };
 
 /**
  * `go: { copy: { text, label?, sensitive? } }` (Task 8x, the eleventh shape): a «Copiar» button. Kino puts `text` on the
@@ -1499,30 +1478,6 @@ interface KinoPanelScreenContext extends KinoPanelContext {
 }
 
 /**
- * Task 11 (apiVersion 14): the context of a tab you contribute (`"kinds": ["live"]`) on an En vivo channel. Exactly these keys:
- * live has no ref, title, ids, position, duration, pause, stats or player block. `channel.provider` is the id of the plugin
- * that lists the channel, `channel.code` its id there, `channel.name` its listed name: pass the first two to
- * `go.liveChannel` to tune another device to it. Sent only for a channel its provider's listing confirmed as not 18+, never
- * for «Mis canales» (the person's own lists). On a zap Kino calls `panel` again with the new channel (a render, never a
- * press); the panel stays open. Your `player` actions are dropped whole (live_channel); no `playerEvent` on live.
- * `values.video` is per channel. In screen mode `state` and `size` come too, as in `KinoPanelScreenContext`.
- */
-interface KinoLivePanelContext {
-  kind: "live";
-  live: true;
-  channel: { provider: string; code: string; name: string };
-  foreign: true;
-  source: { pluginId: string; name: string };
-  device: "tv" | "phone";
-  lang: string;
-  tab?: string;
-  values: { video: Record<string, KinoPanelValue>; plugin: Record<string, KinoPanelValue> };
-  features?: ("loading" | "screen")[];
-  state?: Record<string, unknown>;
-  size?: { widthClass: KinoScreenSizeClass; heightClass: KinoScreenSizeClass; orientation: "portrait" | "landscape" };
-}
-
-/**
  * A screen-format panel's event to `panelAction(event, context)`: a node's action. `trigger` is "press" (a tap or a long
  * press), "change" or "submit"; `name` and `arg` are the node's event; `key` the input that fired (absent for a tap); `values`
  * the inputs' values (`context.state.inputs`). "tab" and "open" stay reserved.
@@ -1621,12 +1576,12 @@ interface KinoPlugin {
    * apiVersion 9, required when the manifest declares `panel`: the panel the button opens. Called with the context when it
    * opens, on a tab press and every `refreshMs`. 20 s per call; a panel that is not an object shows nothing.
    */
-  panel?(context: KinoPanelContext | KinoPanelScreenContext | KinoLivePanelContext): Promise<KinoPanel | KinoPanelScreenResult>;
+  panel?(context: KinoPanelContext | KinoPanelScreenContext): Promise<KinoPanel | KinoPanelScreenResult>;
   /**
    * apiVersion 9, optional: a button pressed, an input changed or submitted. Called with TWO arguments, `(event, context)`. 20 s
    * per call. While the panel is in screen mode (Task 8i) the event is a `KinoPanelScreenEvent` and the answer a `KinoPanelScreenAnswer`.
    */
-  panelAction?(event: KinoPanelEvent | KinoPanelScreenEvent, context: KinoPanelContext | KinoPanelScreenContext | KinoLivePanelContext): Promise<KinoPanelAnswer | KinoPanelScreenAnswer | null | void>;
+  panelAction?(event: KinoPanelEvent | KinoPanelScreenEvent, context: KinoPanelContext | KinoPanelScreenContext): Promise<KinoPanelAnswer | KinoPanelScreenAnswer | null | void>;
   /**
    * apiVersion 9, optional, needs no `panel`: told about the playing title's player events (fire and forget: 5 s, at most one
    * in flight, events coalesce). May answer a `player` action, a `message` or (Task 8i, apiVersion 14 and later) a new

@@ -14,7 +14,8 @@
   - reactions as larger glyphs, room notes as small centred lines;
   - the newest at the bottom (40 on a phone, 25 on a TV).
 - **The chat input:** send with the icon inside the field or the keyboard's own button. The eight reactions are hidden
-  behind the emoji button, and sending one closes them.
+  behind the emoji button, and sending one closes them. Reactions are large: 48 dp buttons in the palette, a big glyph in
+  the list.
 - **The room view:**
   - a header row with the room's status and, for guests, a **Sync** icon;
   - **Follow the host** in the Room tab;

@@ -57,7 +57,6 @@ const GO_TEXT = {
   titleByIds: "Kino's own title page for TMDB or IMDb ids, where the person picks any of their sources",
   url: "an https link in the browser, after Kino's own confirmation sheet (a QR code on a TV)",
   copy: "Kino puts the plugin's text on the clipboard and always shows its own «Copiado» toast (a TV cannot copy)",
-  liveChannel: "the player tunes to an En vivo provider's channel (`provider`, `code`), only for a plugin whose player tab declares `\"kinds\": [\"live\"]`",
 };
 const CONSENTS = () => [
   ["screen", null], ["library", c.kinoLibrary], ["playerPanelTab", c.manifest.panel.contributes], ["playerControl", c.kinoPlayerControl],
@@ -155,7 +154,7 @@ export const TABLES = {
   })),
   screenGo: () => table(["`go`", "What opens", "Sent from"], S.goShapes.map((g) => {
     if (!GO_TEXT[g]) throw new Error(`guide-tables: no description for the go shape ${g}`);
-    const from = g === "titleByIds" || g === "url" || g === "copy" || g === "liveChannel"
+    const from = g === "titleByIds" || g === "url" || g === "copy"
       ? `only the person's own ${S.goUrl.fromTriggers.join(" or ")} (a tap, a submit, the answer to one, a pop-up's button, a panel press)`
       : g === "screen" ? "a tap, or an answer, the answer to the reserved `open` included (never a timer's or a pop-up's `onClose`)" : "a tap, or the answer to an event (never the answer to `open`, to a timer or to a pop-up's `onClose`)";
     return [`\`${g}\``, GO_TEXT[g], from];
