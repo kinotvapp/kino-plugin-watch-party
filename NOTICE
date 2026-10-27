@@ -1,0 +1,6 @@
+Kino plugin: Fiesta (Watch Party)
+Copyright 2026 kinotvapp
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+The Node kit under sdk/, contract.json and kino.d.ts come from Kino's plugin SDK (Apache License 2.0).

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- A: a screen with a play button, and two chat bubbles: watching together and talking -->
+  <rect width="512" height="512" rx="112" fill="#0D0D0D"/>
+  <rect x="48" y="166" width="304" height="214" rx="30" fill="#FFFFFF"/>
+  <rect x="160" y="398" width="80" height="22" rx="11" fill="#FFFFFF"/>
+  <path d="M164 222 Q164 205 179 213 L270 264 Q285 273 270 282 L179 333 Q164 341 164 324 Z" fill="#E50914"/>
+  <path d="M302 52 H430 Q464 52 464 86 V146 Q464 180 430 180 H366 L322 216 L332 180 H302 Q268 180 268 146 V86 Q268 52 302 52 Z" fill="#E50914" stroke="#0D0D0D" stroke-width="16" stroke-linejoin="round"/>
+  <circle cx="322" cy="116" r="15" fill="#FFFFFF"/>
+  <circle cx="366" cy="116" r="15" fill="#FFFFFF"/>
+  <circle cx="410" cy="116" r="15" fill="#FFFFFF"/>
+  <path d="M362 268 H434 Q466 268 466 300 V336 Q466 368 434 368 H426 L438 412 L388 368 H362 Q330 368 330 336 V300 Q330 268 362 268 Z" fill="#FFFFFF" stroke="#0D0D0D" stroke-width="16" stroke-linejoin="round"/>
+  <rect x="360" y="296" width="76" height="18" rx="9" fill="#0D0D0D"/>
+  <rect x="360" y="324" width="48" height="18" rx="9" fill="#0D0D0D"/>
+</svg>

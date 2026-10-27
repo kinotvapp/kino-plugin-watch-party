@@ -1,0 +1,3 @@
+# The signature covers the exact bytes of plugin.js: never let git convert its line endings.
+plugin.js -text
+*.png binary

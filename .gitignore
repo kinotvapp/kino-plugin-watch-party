@@ -1,0 +1,11 @@
+# Written by `node sdk/run.mjs` while trying the plugin locally.
+.kino-storage.json
+.kino-cookies.json
+.kino-secrets.json
+.kino-shared.json
+# Never commit a key: the author key lives outside the repository (scripts/sign.mjs).
+*.pem
+.env
+node_modules/
+dist/
+.superpowers/

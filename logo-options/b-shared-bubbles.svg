@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- B: two overlapping chat bubbles, two people, sharing one play triangle -->
+  <rect width="512" height="512" rx="112" fill="#0D0D0D"/>
+  <path d="M120 72 H284 Q332 72 332 120 V232 Q332 280 284 280 H164 L104 330 L116 280 Q72 276 72 232 V120 Q72 72 120 72 Z" fill="#FFFFFF"/>
+  <path d="M228 176 H392 Q440 176 440 224 V336 Q440 380 396 384 L408 434 L348 384 H228 Q180 384 180 336 V224 Q180 176 228 176 Z" fill="#E50914" stroke="#0D0D0D" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M272 226 Q272 208 288 217 L380 270 Q394 280 380 290 L288 343 Q272 352 272 334 Z" fill="#FFFFFF"/>
+</svg>
