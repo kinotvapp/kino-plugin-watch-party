@@ -5,8 +5,10 @@
 //
 // - `kino.room` (capability `room`): a short-lived mailbox hosted on the person's own device and reached over the Internet
 //   through Kino's own tunnel. One person creates the room and is its HOST; the others join with the room's words and its
-//   short code (4 digits, `room.open({ codeDigits: 4 })`; typed, or read from a QR with `kino.qr.scan`, capability `qrScan`).
-//   The plugin never sees a URL.
+//   12-digit code. People never handle them: the host asks the Kino author's short-code service (url-code.kinotv.workers.dev,
+//   the only host this plugin reaches) for a 5-digit code that stands for `https://<words>.trycloudflare.com/?c=<code>`, and a
+//   guest types those 5 digits; the plugin reads the words and the code back out of that address (strictly) and never fetches
+//   it. The QR carries the same address, so a phone that scans it needs no service. Words + code stay as a fallback.
 // - Identity is Kino's: a member IS the `memberId` Kino gives its session at the endpoint it joined (`from` on every event).
 //   A message never names its sender, so no one can claim to be someone else; a member's place is freed only by Kino's own
 //   `leave` event.
@@ -40,7 +42,8 @@ export const LIMITS = {
   histEntries: 200, // the chat kept on each device
   histBytes: 64 * 1024, // ... or this much JSON, whichever comes first
   lateJoin: 50, // what a newcomer gets
-  shown: 100, // what the tab shows
+  shown: 40, // the messages the tab draws on a phone (newest at the bottom; the list scrolls)
+  shownTv: 25, // and on a TV
   snapChat: 20, // the chat tail in a snapshot
   snapBytes: 8192, // a snapshot's JSON, at most (the room's payload limit)
   chunkBytes: 6144, // one history chunk
@@ -76,9 +79,11 @@ export const LIMITS = {
   needMaxTries: 3, // the same gap asked this many times, then it is given up
   holes: 20,
   probeMs: 20000,
-  partyCodeDigits: 4, // the party room's code (the words are the address; 4 digits keep strangers out, nothing more)
-  minCodeDigits: 4, // a code typed or scanned: 4..12 digits (older rooms used 12)
+  minCodeDigits: 4, // a room code typed or read: 4..12 digits (the party now uses Kino's default 12)
   maxCodeDigits: 12,
+  shortDigits: 5, // the service's short code
+  shortTimeoutMs: 5000, // each call to the service, and one retry
+  shortTtlMs: 8 * 3600000, // the service keeps a code this long (it says so in `expires_in_seconds`)
   epochSpan: 1000000, // cseq = epoch * epochSpan + n
   maxEpoch: 1000, // a room never sees this many changes of host; a bigger claim is refused (and cseq stays far below 1e12)
   hostFailedMs: 60000, // a failed try of the host's door counts this long
@@ -91,8 +96,6 @@ export const LIMITS = {
 
 /** The eight quick reactions: the only thing a reaction may carry, and all a TV (a `display` seat) may send. */
 export const EMOJIS = ["👍", "😂", "😮", "😢", "❤️", "🔥", "👏", "🍿"];
-/** The picker under the text field: it only inserts into the text (no external emoji data). */
-export const PICKER = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😮", "😱", "😢", "😭", "😡", "👍", "👎", "👏", "🙌", "🙏", "💪", "🔥", "❤️", "🎉", "🍿"];
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 // ---------- text, ids and codes (pure) ----------
@@ -541,6 +544,110 @@ export function readLinkMessage(p) {
   return { t: "link", words, code, name: scrubName(p.name), pair: p.pair };
 }
 
+// ---------- the short-code service (url-code.kinotv.workers.dev) ----------
+
+/** The service: POST `{ url }` -> `{ code, url, expires_in_seconds }`; GET `/<code>` -> the same, 404 for an unknown code. */
+export const SHORT_SERVICE = "https://url-code.kinotv.workers.dev/";
+
+/** The room's own address as the short code stands for it (and as the QR carries it). */
+export function roomUrlOf(words, code) {
+  return `https://${words}.trycloudflare.com/?c=${code}`;
+}
+
+/**
+ * The words and the code out of a room address, STRICTLY: `https://<words>.trycloudflare.com/?c=<4..12 digits>` (or without
+ * the `/`), words of 2 to 6 lowercase letter-only parts joined by hyphens, at most 63 characters; no user, port, other path,
+ * other query or fragment. Anything else is null. The address is only read, never fetched.
+ */
+export function parseRoomUrl(url) {
+  if (typeof url !== "string" || url.length > 200) return null;
+  const m = /^https:\/\/([a-z]+(?:-[a-z]+){1,5})\.trycloudflare\.com\/?\?c=([0-9]{4,12})$/.exec(url);
+  if (!m || m[1].length > 63) return null;
+  return { words: m[1], code: m[2] };
+}
+
+/** A typed short code: spaces, hyphens and dots dropped, full-width digits read as digits, exactly 5 digits; else null. */
+export function normShort(raw) {
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const s = asciiDigits(String(raw)).replace(/[\s.\-]/g, "");
+  return /^[0-9]{5}$/.test(s) ? s : null;
+}
+
+/** The short code to read aloud: «41 408». */
+export function groupShort(code) {
+  return /^[0-9]{5}$/.test(String(code)) ? `${String(code).slice(0, 2)} ${String(code).slice(2)}` : String(code || "");
+}
+
+/** The service's answer read defensively: `{ code, url, ttlMs }` or null (a code as a string or a number of 5 digits). */
+export function readShortAnswer(body) {
+  if (!isObj(body)) return null;
+  const code = normShort(typeof body.code === "number" ? String(body.code) : body.code);
+  const url = typeof body.url === "string" ? body.url : null;
+  const ttl = Number.isFinite(body.expires_in_seconds) && body.expires_in_seconds > 0 ? Math.min(body.expires_in_seconds * 1000, LIMITS.shortTtlMs) : LIMITS.shortTtlMs;
+  return { code, url, ttlMs: ttl };
+}
+
+const shortFetchOptions = { timeoutMs: LIMITS.shortTimeoutMs, redirect: "manual", cookies: false, maxBytes: 4096 };
+
+async function callService(fetch, url, options) {
+  let last = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const res = await fetch(url, { ...shortFetchOptions, ...options });
+      if (res && res.status >= 500 && i === 0) { last = { status: res.status }; continue; }
+      return res;
+    } catch (e) {
+      last = e;
+    }
+  }
+  return last && last.status ? last : null;
+}
+
+/** The host's short code for its room: `{ ok: true, short, until }` or `{ ok: false, error: "network" | "invalid" }`. */
+export async function createShortCode(fetch, words, code, now) {
+  const want = roomUrlOf(words, code);
+  const res = await callService(fetch, SHORT_SERVICE, { method: "POST", headers: { "content-type": "application/json" }, body: { json: { url: want } } });
+  if (!res || typeof res.status !== "number") return { ok: false, error: "network" };
+  if (res.status !== 200) return { ok: false, error: res.status >= 500 ? "network" : "invalid" }; // only 200 counts
+  let body;
+  try { body = res.json(); } catch (e) { return { ok: false, error: "invalid" }; }
+  const a = readShortAnswer(body);
+  // The service must give back the very address it stored, with a 5-digit code.
+  if (!a || !a.code || (a.url !== null && a.url !== want)) return { ok: false, error: "invalid" };
+  return { ok: true, short: a.code, until: now + a.ttlMs };
+}
+
+/**
+ * Revokes a short code (`DELETE /<code>`), best effort: 3 s, no retry, whatever the answer (its shape is not relied on), and
+ * it never throws. Kino's own room closings (its TTL, 30 wrong joins, the app ending, the plugin switched off) cannot run it:
+ * the service's 8-hour expiry covers those.
+ */
+export async function revokeShortCode(fetch, short) {
+  const code = normShort(short);
+  if (!code || typeof fetch !== "function") return false;
+  try {
+    await fetch(SHORT_SERVICE + code, { method: "DELETE", timeoutMs: 3000, redirect: "manual", cookies: false, maxBytes: 1024 });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** A guest's lookup: `{ ok: true, words, code }` or `{ ok: false, error: "notFound" | "invalid" | "network" }`. */
+export async function lookupShortCode(fetch, short) {
+  const code = normShort(short);
+  if (!code) return { ok: false, error: "invalid" };
+  const res = await callService(fetch, SHORT_SERVICE + code, { method: "GET" });
+  if (!res || typeof res.status !== "number") return { ok: false, error: "network" };
+  if (res.status === 404) return { ok: false, error: "notFound" };
+  if (res.status !== 200) return { ok: false, error: res.status >= 500 ? "network" : "invalid" }; // only 200 counts
+  let body;
+  try { body = res.json(); } catch (e) { return { ok: false, error: "invalid" }; }
+  const a = readShortAnswer(body);
+  const room = a && parseRoomUrl(a.url);
+  return room ? { ok: true, ...room } : { ok: false, error: "invalid" };
+}
+
 // ---------- inviting: a text to paste in any chat, and reading it back (pure) ----------
 
 export const INVITE_MAX = 500;
@@ -550,15 +657,21 @@ export const INVITE_MAX = 500;
  * year, season and episode) and the source plugin's name help friends open the same title with the same plugin. Nothing else:
  * no member ids, no tunnel address. Always under INVITE_MAX characters (a long title is cut first).
  */
-export function invitationText({ words, code, media = null }) {
-  const lines = (titleLine) => [
+export function invitationText({ short = null, words, code, media = null }) {
+  const lines = (titleLine) => (short ? [
+    "Únete a mi fiesta en Kino 🎬",
+    ...(titleLine ? [titleLine] : []),
+    `Código: ${short}`,
+    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.",
+    "(Join my Kino watch party: type the code above in Kino.)",
+  ] : [
     "Únete a mi fiesta en Kino 🎬",
     ...(titleLine ? [titleLine] : []),
     `Palabras: ${words}`,
     `Código: ${code}`,
-    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Unirme.",
+    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Entrar con palabras y código.",
     "(Join my Kino watch party: words + code above.)",
-  ].join("\n");
+  ]).join("\n");
   const titleOf = (title) => {
     if (!media || !title) return null;
     const kind = media.kind === "series" ? "Serie" : media.kind === "live" ? "En vivo" : "Película";
@@ -625,6 +738,7 @@ export function parseInvitation(raw) {
       if (found.size > 1) return { error: "ambiguous" };
       code = found.size ? [...found][0] : null;
     }
+    if (!words && code && /^[0-9]{5}$/.test(code)) return { short: code };
     if (code && !normCode(code)) code = null;
     if (!words || !code) return { error: "missing" };
     return { words, code };
@@ -666,7 +780,7 @@ export function newParty(name = "") {
     banner: null, lastOkAt: 0, hostFailed: false, hostFailedAt: 0, awaiting: null, gone: [], probe: null, moved: null, aloneSince: 0,
     realLeftAt: 0, lobby: {}, lobbyHello: {}, lobbySent: {}, lobbySentAt: [], recovering: false, askedMid: null,
     oldView: null, link: null, pending: null, pairs: {}, closeJoined: null, closeHosted: false, expiresAtMs: 0, redirect: null,
-    correctedAt: 0, correctedTo: null, lastReaction: null, notes: [],
+    correctedAt: 0, correctedTo: null, notes: [], short: null, shortUntil: 0, shortError: false, shortMine: false,
   };
 }
 
@@ -738,7 +852,6 @@ function hostAddChat(p, entry, now) {
   const e = { c: p.maxCseq, ...entry, at: now };
   p.hist = addEntries(p.hist, [e]);
   p.pendingChat.push(e);
-  if (e.k === "emoji") p.lastReaction = { at: now, n: e.n, x: e.x };
   return e;
 }
 
@@ -784,7 +897,7 @@ export function hostReceive(p, ev, now) {
     case "msg": {
       if (member.role === "display") return; // a TV's seat may only react (a client convention: see the README)
       if (!chatAllowed(p.chatTimes, member.id, now)) return;
-      const text = maskCode(scrub(m.text, LIMITS.textChars), p.code);
+      const text = maskCode(maskCode(scrub(m.text, LIMITS.textChars), p.code), p.short);
       if (!text) return;
       hostAddChat(p, { k: "msg", by: member.id, n: member.name, x: text }, now);
       return;
@@ -844,7 +957,12 @@ const isDisplay = (p, id) => (rosterOf(p, id) || {}).role === "display";
 function hostHello(p, mid, m, now) {
   const bound = rosterOf(p, mid);
   if (bound) {
-    // A second hello from the same session only refreshes a TV's pairing; it never adds a member or changes a seat.
+    // A second hello from the same session refreshes a TV's pairing or the member's name («Cambiar mi nombre»); it never adds
+    // a member or changes a seat.
+    if (m.name && m.name !== bound.name && m.role === bound.role) {
+      p.roster = p.roster.map((r) => (r.id === mid ? { ...r, name: m.name } : r));
+      p.snapDue = true;
+    }
     if (bound.role === "display" && m.role === "display" && m.pair && m.pair !== bound.pair) {
       const pair = p.pairs[m.pair];
       p.roster = p.roster.map((r) => (r.id === mid ? { ...r, pair: m.pair, of: pair && rosterOf(p, pair.mid) ? pair.mid : r.of } : r));
@@ -999,8 +1117,6 @@ function mergeChat(p, entries, now) {
   const ok = entries.filter((e) => !(isDisplay(p, e.by) && e.k !== "emoji"));
   if (!ok.length) return;
   p.hist = addEntries(p.hist, ok, p.oldest ? p.oldest - 1 : 0);
-  const last = ok[ok.length - 1];
-  if (last.k === "emoji" && now - last.at < 60000) p.lastReaction = { at: now, n: last.n, x: last.x };
   p.maxKnown = Math.max(p.maxKnown, histMax(p));
 }
 
@@ -1084,6 +1200,8 @@ export function promote(p, now, goneName = "") {
   p.want = [];
   p.maxCseq = Math.max(histMax(p), p.epoch * LIMITS.epochSpan);
   p.recovering = true;
+  p.short = null; // the old short code points to the old host's door: this host asks for its own («Obtener un código»)
+  p.shortError = false;
   p.hostFailed = false;
   p.awaiting = null;
   p.redirect = null;
@@ -1461,36 +1579,26 @@ function stepDown(p, now) {
 
 const T = {
   title: ["Fiesta", "Watch party"],
-  intro: ["Mira con otras personas a la vez: chat y video sincronizado. La sala vive en el aparato de quien la crea.", "Watch together: chat and playback in step. The room lives on the device of whoever creates it."],
-  sameSource: ["Todos deben ver el mismo título con el mismo plugin.", "Everyone must watch the same title through the same plugin."],
   yourName: ["Tu nombre", "Your name"],
   create: ["Crear sala", "Create room"],
-  joinToggle: ["Unirme a una sala", "Join a room"],
   words: ["Palabras de la sala", "Room words"],
-  code: ["Código (4 números)", "Code (4 digits)"],
   enter: ["Entrar", "Join"],
-  scan: ["Escanear el código QR", "Scan the QR code"],
   scanTitle: ["Escanea el código de la sala", "Scan the room's code"],
   linkStart: ["Vincular con mi teléfono", "Link with my phone"],
-  linkInfo: ["En tu teléfono, dentro de la sala, toca «Agregar dispositivo» y escanea este código. Sirve una sola vez.", "On your phone, inside the room, tap “Add device” and scan this code. It works once."],
+  linkInfo: ["En el teléfono, en la sala: «Agregar dispositivo» y escanea. Sirve una vez.", "On the phone, in the room: “Add device” and scan. It works once."],
   linkCancel: ["Cancelar", "Cancel"],
   addDevice: ["Agregar dispositivo", "Add device"],
   addDeviceTitle: ["Escanea el código que muestra TU televisor", "Scan the code YOUR TV shows"],
-  send: ["Enviar", "Send"],
   message: ["Mensaje", "Message"],
-  emojiMore: ["Más emojis", "More emoji"],
   follow: ["Seguir al anfitrión", "Follow the host"],
-  sync: ["Sincronizar", "Sync"],
   leave: ["Salir de la sala", "Leave the room"],
   leaveConfirm: ["¿Salir de la sala?", "Leave the room?"],
   chatTab: ["Chat", "Chat"],
   roomTab: ["Sala", "Room"],
-  invite: ["Invitar", "Invite"],
-  inviteInfo: ["Comparte las palabras y el código, o que escaneen el QR. El código evita que entre quien no lo tenga; no es un cifrado de alta seguridad: no compartas nada sensible.", "Share the words and the code, or let them scan the QR. The code keeps out whoever does not have it; it is not high-security encryption: share nothing sensitive."],
+  inviteInfo: ["Comparte el código o el QR. Solo deja afuera a extraños: no compartas nada sensible.", "Share the code or the QR. It only keeps strangers out: share nothing sensitive."],
   openBackup: ["Abrir puerta de respaldo", "Open a backup door"],
   backupInfo: ["Si el anfitrión se va, la sala sigue en una puerta de respaldo.", "If the host leaves, the room goes on through a backup door."],
   empty: ["Todavía no hay mensajes.", "No messages yet."],
-  same: ["Viendo lo mismo", "Watching the same"],
   members: ["Personas", "People"],
   noScreens: ["La Fiesta necesita las pantallas de plugins activas en Ajustes.", "Watch party needs plugin screens switched on in Settings."],
   openTitle: ["Abrir este título", "Open this title"],
@@ -1498,6 +1606,7 @@ const T = {
   retry: ["Reintentar", "Try again"],
   findRoom: ["Buscar la sala", "Look for the room"],
   hostMark: ["anfitrión", "host"],
+  back: ["Atrás", "Back"],
 };
 const tx = (k) => ({ es: T[k][0], en: T[k][1] });
 const both = (es, en) => ({ es, en });
@@ -1519,19 +1628,35 @@ function errorText(e) {
 const toast = (t, role) => ({ toast: role ? { text: t.es, textEn: t.en, role } : t.es, toastEn: t.en });
 
 /**
- * «Copiar invitación» and «Copiar solo el código»: Kino's `go.copy` (a press only; Kino shows «Copiado»; `sensitive` keeps the
- * text out of clipboard previews). Never on a TV (Kino drops the copy there): `devices` and the context say so.
+ * The room in one line: «Sala: 41 408», and on the host's phone an icon-only «Copiar invitación» at its right end (Kino's
+ * `go.copy`; Kino shows «Copiado»; `sensitive` keeps the text out of clipboard previews). Never a copy on a TV (Kino drops it
+ * there): `devices` and the context say so. Without a short code: why, and for the host one press to ask again.
  */
-function copyButtons(p, ctx) {
-  if (!p.code || !p.hostWords || (ctx && ctx.device === "tv")) return [];
-  const text = invitationText({ words: p.hostWords, code: p.code, media: p.media });
+function roomLine(p, ctx) {
+  if (!p.short) return shortNodes(p);
+  const copy = p.role === "host" && p.code && p.hostWords && !isTv(ctx)
+    ? [{
+      type: "IconButton", key: "btnCopyInvite", icon: "copy", labelText: "Copiar invitación", labelTextEn: "Copy invitation", devices: ["phone", "desktop"],
+      onPressed: { go: { copy: { text: invitationText({ short: p.short, words: p.hostWords, code: p.code, media: p.media }), label: "Invitación a la Fiesta", sensitive: true } } },
+    }]
+    : [];
   return [{
-    type: "Row", wrap: true, gap: 4, devices: ["phone", "desktop"],
+    type: "Row", key: "roomLine", gap: 4, crossAxisAlignment: "center",
     children: [
-      Btn("TextButton", both("Copiar invitación", "Copy invitation"), { go: { copy: { text, label: "Invitación a la Fiesta", sensitive: true } } }, { key: "btnCopyInvite", icon: "copy" }),
-      Btn("TextButton", both("Copiar solo el código", "Copy the code only"), { go: { copy: { text: p.code, label: "Código de la Fiesta", sensitive: true } } }, { key: "btnCopyCode", icon: "copy" }),
+      Text(both("Sala:", "Room:"), { color: "muted" }),
+      Text(both(groupShort(p.short), groupShort(p.short)), { key: "shortCode", style: "h5", bold: true, flex: 1 }),
+      ...copy,
     ],
   }];
+}
+
+/** Why there is no short code (with one press to ask again: the host only). */
+function shortNodes(p) {
+  if (p.role !== "host") return [Text(both("Pídele el código al anfitrión, o escanea su QR.", "Ask the host for the code, or scan their QR."), { style: "caption" })];
+  return [
+    Text(both("No pude crear el código corto. Puedes reintentar, o usar el QR o las opciones avanzadas.", "I could not create the short code. Try again, or use the QR or the advanced options."), { color: p.shortError ? "error" : "muted" }),
+    Btn("TextButton", both("Obtener un código", "Get a code"), busyTap("shortCode"), { key: "btnShort" }),
+  ];
 }
 
 /**
@@ -1546,51 +1671,109 @@ export const BUSY_ROWS = {
   busyDoor: ["Abriendo la puerta de respaldo…", "Opening the backup door…"],
   busyLink: ["Preparando el código para el teléfono…", "Preparing the code for the phone…"],
   busyTv: ["Vinculando el televisor…", "Linking the TV…"],
+  busyShort: ["Creando el código…", "Creating the code…"],
+  busySync: ["Sincronizando…", "Syncing…"],
 };
 export const BUSY = {
-  create: { row: "busyCreate", button: "btnCreate" },
-  join: { row: "busyJoin", button: "btnJoin" },
-  scanJoin: { row: "busyJoin", button: "btnScan" },
-  redirect: { row: "busyJoin" },
-  followHost: { row: "busyJoin" },
-  retryHost: { row: "busyJoin" },
-  enterParty: { row: "busyJoin" },
-  joinMoved: { row: "busyJoin" },
-  findRoom: { row: "busySearch", button: "btnFind" },
-  openBackup: { row: "busyDoor", button: "btnBackup" },
-  linkStart: { row: "busyLink", button: "btnLink" },
-  addDevice: { row: "busyTv", button: "btnAddDevice" },
+  create: { label: "busyCreate", button: "btnCreate" },
+  join: { label: "busyJoin", button: "btnJoin" },
+  joinShort: { label: "busyJoin", button: "btnJoinShort" },
+  lookupShort: { label: "busySearch", button: "btnLookup" },
+  wordsNext: { label: "busyJoin", button: "btnWordsNext" },
+  readInvite: { label: "busyJoin", button: "btnReadInvite" },
+  joinTarget: { label: "busyJoin", button: "btnJoinTarget" },
+  shortCode: { label: "busyShort", button: "btnShort" },
+  scanJoin: { label: "busyJoin", button: "btnScan" },
+  redirect: { label: "busyJoin" },
+  followHost: { label: "busyJoin" },
+  retryHost: { label: "busyJoin" },
+  enterParty: { label: "busyJoin" },
+  joinMoved: { label: "busyJoin" },
+  findRoom: { label: "busySearch", button: "btnFind" },
+  openBackup: { label: "busyDoor", button: "btnBackup" },
+  linkStart: { label: "busyLink", button: "btnLink" },
+  addDevice: { label: "busyTv", button: "btnAddDevice" },
+  sync: { label: "busySync", button: "btnSync" },
+  resync: { label: "busySync" },
 };
 
-/** The tap of a press that waits: the progress row shown and the button disabled at once (Kino's own ui operations), then the event. */
+/** The progress row of [event]: its own, placed right after the button (or banner) that triggers it. */
+export const waitKey = (event) => `busy.${event}`;
+
+/** The tap of a press that waits: its own progress row shown and the button disabled at once (Kino's own ui operations), then the event. */
 export function busyTap(event) {
   const b = BUSY[event];
-  return { ui: [{ show: b.row }, ...(b.button ? [{ disable: b.button }] : [])], event };
+  return { ui: [{ show: waitKey(event) }, ...(b.button ? [{ disable: b.button }] : [])], event };
 }
 
-/** The ui operations an answer to [event] carries: the row hidden, the button enabled again. */
+/** The ui operations an answer to [event] carries: its row (and the error's retry row) hidden, the button enabled again. */
 function settle(event) {
   const b = BUSY[event];
-  return b ? [{ hide: b.row }, ...(b.button ? [{ enable: b.button }] : [])] : [];
+  return b ? [{ hide: waitKey(event) }, { hide: waitKey("retry") }, ...(b.button ? [{ enable: b.button }] : [])] : [];
 }
 
 /** A failed press that waits: the error shown in place (Kino's panel state) with a retry of the same press. */
-const failed = (event, t) => ({ state: { error: { es: t.es, en: t.en, retry: BUSY[event] ? event : null } } });
+// A failed press: the error in place and, when it can be retried, the D-pad on «Reintentar» (withFocus falls back to the
+// view's first control when there is none, e.g. a recovery screen whose own button is the retry).
+// A typing mistake: the error in place, no retry (the D-pad goes back to the field).
+const invalid = (t) => ({ state: { error: { es: t.es, en: t.en, retry: null } } });
+const failed = (event, t) => ({ state: { error: { es: t.es, en: t.en, retry: BUSY[event] ? event : null } }, ...(BUSY[event] ? { focus: "btnRetry" } : {}) });
 
-/** The progress rows (hidden until a tap shows one), present in every state of the tab: one label each, read by screen readers. */
-function busyRows() {
-  return Object.entries(BUSY_ROWS).map(([key, [es, en]]) => ({
+/** A hidden progress row with one label (Kino's progress draws it; screen readers read it). */
+function waitRow(key, label) {
+  const [es, en] = BUSY_ROWS[label];
+  return {
     type: "Row", key, hidden: true, gap: 8, crossAxisAlignment: "center",
     children: [{ type: "LinearProgressIndicator", labelText: es, labelTextEn: en, flex: 1 }],
-  }));
+  };
 }
 
-/** The error of the last press that waited, in place, with its retry. */
-function errorBanner(ctx) {
+/** The busy key a node's own tap shows (a button's onPressed, a banner's action, a form's onSubmitted), if any. */
+function shownBusy(n) {
+  const tap = n.onPressed || n.onTap || n.onSubmitted || (n.action && n.action.onTap);
+  if (!isObj(tap) || !Array.isArray(tap.ui)) return null;
+  const show = tap.ui.find((op) => isObj(op) && typeof op.show === "string" && op.show.startsWith("busy."));
+  return show ? { key: show.show, event: tap.event } : null;
+}
+
+/**
+ * Puts each waiting press's progress row right after its trigger, in the same list (so it shows where the person is looking,
+ * even in a scrolled panel); a trigger inside a Row gets its row right after that Row. [labelFor] picks the row's label.
+ */
+function addWaitRows(node, labelFor, seen = new Set()) {
+  if (!isObj(node)) return node;
+  const kids = Array.isArray(node.children) ? node.children : null;
+  if (!kids) return node;
+  const inRow = node.type === "Row";
+  const out = [];
+  for (const c of kids) {
+    out.push(addWaitRows(c, labelFor, seen));
+    if (inRow) continue; // the Row's parent places them
+    const own = shownBusy(c);
+    const inside = c.type === "Row" && Array.isArray(c.children) ? c.children.map(shownBusy).filter(Boolean) : [];
+    for (const b of [...(own ? [own] : []), ...inside]) {
+      if (seen.has(b.key)) continue;
+      seen.add(b.key);
+      out.push(waitRow(b.key, labelFor(b.event)));
+    }
+  }
+  return { ...node, children: out };
+}
+
+/** The error of the last press that waited, in place, with its retry (its own row follows it). */
+/**
+ * A failed press's error: the text in the error colour and, when it can be retried, «Reintentar» as a keyed button (a
+ * banner's own action has no key, so the D-pad could not be sent to it). [withRetry] false on a recovery screen, whose own
+ * button is the one way on.
+ */
+function errorNodes(ctx, withRetry = true) {
   const e = isObj(ctx.state) && isObj(ctx.state.error) ? ctx.state.error : null;
-  if (!e || typeof e.es !== "string") return null;
-  const retry = typeof e.retry === "string" && BUSY[e.retry] ? Action(tx("retry"), busyTap(e.retry)) : undefined;
-  return Banner("error", both(e.es, typeof e.en === "string" ? e.en : e.es), retry);
+  if (!e || typeof e.es !== "string") return [];
+  const out = [Text(both(e.es, typeof e.en === "string" ? e.en : e.es), { key: "errText", color: "error" })];
+  if (withRetry && typeof e.retry === "string" && BUSY[e.retry]) {
+    out.push(Btn("ElevatedButton", tx("retry"), { ui: [{ show: waitKey("retry") }], event: e.retry }, { key: "btnRetry" }));
+  }
+  return out;
 }
 
 // ---------- drawing the tab (screen kit, narrow enough for the pinned panel) ----------
@@ -1600,25 +1783,21 @@ const Btn = (type, t, onPressed, extra = {}) => ({ type, labelText: t.es, labelT
 const Banner = (role, t, action) => ({ type: "MaterialBanner", role, text: t.es, textEn: t.en, ...(action ? { action } : {}) });
 const Action = (t, onTap, arg) => ({ label: t.es, labelEn: t.en, onTap, ...(arg !== undefined ? { arg } : {}) });
 
-function entryLine(e) {
-  return both(`${displayName(e.n)}: ${e.x}`, `${displayName(e.n, true)}: ${e.x}`);
-}
-
 function matchBanner(p, ctx) {
   if (p.role === "host") return null;
   const m = mediaMatch(ctx, p.media);
   const go = titleByIdsOf(p.media);
   const open = go ? Action(tx("openTitle"), { go }) : undefined;
   switch (m.reason) {
-    case "same": return { type: "Badge", text: "✓ " + T.same[0], textEn: "✓ " + T.same[1] };
+    case "same": return null; // said in the header row
     case "noRoomTitle": return null;
     case "noSource": return Banner("info", both("Este video no es de un plugin: solo chat.", "This video is not a plugin's: chat only."));
     case "live": return Banner("info", both("En vivo: solo chat, sin sincronizar.", "Live: chat only, no sync."));
-    case "noIds": return Banner("info", both("No se puede sincronizar este título: su plugin no da sus identificadores. Solo chat.", "This title cannot be synced: its plugin gives no ids for it. Chat only."));
+    case "noIds": return Banner("info", both("No se puede sincronizar este título. Solo chat.", "This title cannot be synced. Chat only."));
     case "otherTitle": return Banner("warning", both(`La sala ve «${p.media.title || "otro título"}».`, `The room watches “${p.media.title || "another title"}”.`), open);
     case "otherSource": {
       const name = (p.media && p.media.source.name) || p.media.source.pluginId;
-      return Banner("warning", both(`Esta sala usa «${name}»: abre el título con ese plugin. Si no lo tienes, instálalo primero.`, `This room uses “${name}”: open the title with that plugin. If you don't have it, install it first.`), open);
+      return Banner("warning", both(`Esta sala usa «${name}»: abre el título con ese plugin.`, `This room uses “${name}”: open the title with that plugin.`), open);
     }
     default: return null;
   }
@@ -1644,19 +1823,19 @@ function partyBanner(p, now) {
     case "noAnswer":
       return Banner("warning", both("El anfitrión no responde. Puede ser tu conexión o la suya.", "The host is not answering. It may be your connection or theirs."), Action(tx("retry"), busyTap("retryHost")));
     case "cantCheck":
-      return Banner("warning", both("Sin conexión con la sala: no llegamos al anfitrión ni a otra puerta. Puede ser tu conexión.", "No connection to the room: neither the host nor another door answers. It may be your connection."), Action(tx("retry"), busyTap("retryHost")));
+      return Banner("warning", both("Sin conexión con la sala. Puede ser tu conexión.", "No connection to the room. It may be your connection."), Action(tx("retry"), busyTap("retryHost")));
     case "waitOthers":
-      return Banner("info", both("No llegamos al anfitrión. Si se fue, los demás llegarán a tu puerta y te avisaremos.", "We cannot reach the host. If they left, the others will reach your door and we will tell you."), Action(tx("retry"), busyTap("retryHost")));
+      return Banner("info", both("No llegamos al anfitrión. Si se fue, te avisamos cuando lleguen los demás.", "We cannot reach the host. If they left, we tell you when the others arrive."), Action(tx("retry"), busyTap("retryHost")));
     case "takeOver":
       return Banner("warning", both(`${displayName(b.name)} tampoco llega al anfitrión. ¿Sigues tú como anfitrión?`, `${displayName(b.name, true)} cannot reach the host either. Will you go on as host?`), Action(both("Seguir yo", "Go on myself"), busyTap("retryHost")));
     case "alone":
-      return Banner("info", both("Todos salieron de tu sala. Si siguieron en otra puerta, puedes buscarla.", "Everyone left your room. If they went on through another door, you can look for it."), Action(tx("findRoom"), busyTap("findRoom")));
+      return Banner("info", both("Todos salieron. Si siguieron en otra puerta, búscala.", "Everyone left. If they went on through another door, look for it."), Action(tx("findRoom"), busyTap("findRoom")));
     case "moved":
       return Banner("warning", both(`La sala siguió con ${displayName(b.name)} (${b.count} personas). Si te unes, tu sala se cierra.`, `The room went on with ${displayName(b.name, true)} (${b.count} people). Joining closes your room.`), Action(both("Unirme", "Join"), busyTap("joinMoved")));
     case "closedMine":
       return Banner("warning", both("Tu sala se cerró en este aparato.", "Your room closed on this device."), Action(tx("findRoom"), busyTap("findRoom")));
     case "ended":
-      return Banner("error", both("Tu sala terminó en este aparato y no hay otra puerta. Sal y crea otra si quieres.", "Your room ended on this device and there is no other door. Leave and create another if you like."), Action(tx("leave"), "leave"));
+      return Banner("error", both("Tu sala terminó y no hay otra puerta.", "Your room ended and there is no other door."), Action(tx("leave"), "leave"));
     case "linked":
       return Banner("success", both(`Teléfono vinculado: ${displayName(b.name)}. Entra a su sala.`, `Phone linked: ${displayName(b.name, true)}. Join its room.`), Action(tx("enter"), busyTap("enterParty")));
     default:
@@ -1664,55 +1843,99 @@ function partyBanner(p, now) {
   }
 }
 
-function chatList(p) {
-  const entries = p.hist.slice(-LIMITS.shown).reverse();
+/** Whether a chat entry is this device's own (a member id it had, or the room it hosts now under its own name). */
+function isMine(p, e) {
+  return p.myMids.includes(e.by) || (p.role === "host" && e.by === "host" && e.n === p.me.name);
+}
+
+/** One message's bubble: mine filled with the primary colour, the others' a filled (neutral) card; a reaction is a glyph. */
+function bubble(e, mine) {
+  if (e.k === "emoji") return Text(both(e.x, e.x), { style: "h4" });
   return {
-    type: "ListView", key: "chat",
-    items: entries.map((e) => Text(entryLine(e), { style: e.k === "emoji" ? "h5" : "p" })),
-    empty: Text(tx("empty"), { color: "muted" }),
+    type: "Card", borderRadius: "large", padding: { x: 12, y: 8 },
+    ...(mine ? { color: "primary" } : { variant: "filled" }),
+    children: [Text(both(e.x, e.x))],
   };
 }
 
+/**
+ * The messages as a chat: one item per run of consecutive entries from the same person. Mine sit on the right (the group
+ * aligned to the end, an empty gutter on the left), the others' on the left with the name once above the run. The gutter
+ * (padding + margin, 80 dp on the start or end side) keeps a bubble under about three quarters of the panel; a bubble is as
+ * wide as its text. The newest at the bottom; then this device's messages still on their way, and the recent room notes as
+ * small centred lines.
+ */
+function chatList(p, now, ctx) {
+  const entries = p.hist.slice(-(isTv(ctx) ? LIMITS.shownTv : LIMITS.shown));
+  const groups = [];
+  for (const e of entries) {
+    const last = groups.at(-1);
+    if (last && last.by === e.by) last.entries.push(e);
+    else groups.push({ by: e.by, mine: isMine(p, e), entries: [e] });
+  }
+  const side = (mine) => mine
+    ? { crossAxisAlignment: "end", padding: { start: 48 }, margin: { start: 32 } }
+    : { crossAxisAlignment: "start", padding: { end: 48 }, margin: { end: 32 } };
+  const items = groups.map((g) => ({
+    type: "Column", key: "g" + g.entries[0].c, fill: true, gap: 4, ...side(g.mine),
+    children: [
+      ...(g.mine ? [] : [Text(both(displayName(g.entries[0].n), displayName(g.entries[0].n, true)), { style: "caption", color: "muted" })]),
+      ...g.entries.map((e) => bubble(e, g.mine)),
+    ],
+  }));
+  const pending = pendingOwn(p, now);
+  if (pending.length) {
+    items.push({
+      type: "Column", key: "pending", fill: true, gap: 4, ...side(true),
+      children: [
+        ...pending.map((m) => ({ type: "Card", variant: "outlined", borderRadius: "large", padding: { x: 12, y: 8 }, children: [Text(both(m.x, m.x))] })),
+        Text(both("Enviando…", "Sending…"), { style: "caption", color: "muted" }),
+      ],
+    });
+  }
+  p.notes.filter((n) => now - n.at < 20000).slice(-2).forEach((n, i) => {
+    items.push(Text(both(n.es, n.en), { key: "note" + i, style: "caption", color: "muted", fill: true, crossAxisAlignment: "center" }));
+  });
+  return { type: "ListView", key: "chat", flex: 1, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
+}
+
+/**
+ * The chat, top to bottom: what just happened (a reaction, notes), the messages (newest at the bottom, the part that scrolls),
+ * the 8 reactions (hidden until the emoji button opens them; they close after one is sent), and the input row: the text field,
+ * the emoji button and «Enviar». A TV's display seat can only react: its reactions are shown directly, with no input row.
+ */
 function chatTab(p, now, ctx) {
   const display = p.me.role === "display";
   const children = [];
-  // «Sala abierta»: the host alone in its room gets the invitation right away.
-  if (p.role === "host" && !p.roster.some((m) => m.id !== "host")) {
-    children.push(Text(both(`Sala abierta. Palabras: ${p.hostWords} · Código: ${groupCode(p.code)}`, `Room open. Words: ${p.hostWords} · Code: ${groupCode(p.code)}`)));
-    children.push(...copyButtons(p, ctx));
-  }
-  if (p.lastReaction && now - p.lastReaction.at < 6000) children.push(Text(both(`${p.lastReaction.x} ${displayName(p.lastReaction.n)}`, `${p.lastReaction.x} ${displayName(p.lastReaction.n, true)}`), { style: "h3" }));
-  const recent = p.notes.filter((n) => now - n.at < 20000).slice(-2);
-  for (const n of recent) children.push(Text(both(n.es, n.en), { style: "caption", color: "muted" }));
+  if (p.stuck) children.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
+  else if (p.correctedTo !== null && now - p.correctedAt < 8000) children.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
+  children.push(chatList(p, now, ctx));
+  // The reactions: shown directly for a TV's display seat (all it can send), else hidden behind the emoji toggle (a `ui`
+  // toggle, no round trip); one sent closes them and the answer puts the D-pad back on the input. One compact block of two
+  // lines of four, under the list (which keeps the room left), never pushing it off screen.
   children.push({
-    type: "Row", wrap: true, gap: 4,
-    children: EMOJIS.map((e, i) => ({ type: "TextButton", labelText: e, onPressed: "emoji", arg: String(i), span: 3 })),
+    type: "Row", key: "emojiPalette", wrap: true, gap: 4, ...(display ? {} : { hidden: true }),
+    children: EMOJIS.map((e, i) => ({ type: "TextButton", key: "emoji" + i, labelText: e, onPressed: display ? "emoji" : { ui: [{ hide: "emojiPalette" }], event: "emoji" }, arg: String(i), span: 3 })),
   });
   if (!display) {
-    children.push({ type: "TextField", key: "chatText", labelText: T.message[0], labelTextEn: T.message[1], maxLength: LIMITS.textChars, onSubmitted: "send" });
+    // The field sends on the keyboard's own action (onSubmitted) and on its own send icon inside the field (onTrailingTap; its
+    // label is for screen readers); beside it, the emoji toggle, icon-only. On a TV the send icon is its own D-pad stop:
+    // field, then send, then emoji.
     children.push({
-      type: "Row", wrap: true, gap: 4,
-      children: [Btn("ElevatedButton", tx("send"), "send", { span: 6 }), Btn("TextButton", tx("emojiMore"), { ui: [{ toggle: "picker" }] }, { span: 6 })],
+      type: "Row", key: "inputRow", gap: isTv(ctx) ? 4 : 0, crossAxisAlignment: "center",
+      children: [
+        {
+          type: "TextField", key: "chatText", labelText: T.message[0], labelTextEn: T.message[1], maxLength: LIMITS.textChars, onSubmitted: "send", flex: 1,
+          trailingIcon: "send", trailingLabel: "Enviar", trailingLabelEn: "Send", onTrailingTap: "send",
+        },
+        { type: "IconButton", key: "emojiToggle", icon: "mood", labelText: "Emojis", labelTextEn: "Emoji", onPressed: { ui: [{ toggle: "emojiPalette" }] } },
+      ],
     });
-    children.push({ type: "GridView", key: "picker", hidden: true, columns: 6, children: PICKER.map((e, i) => ({ type: "TextButton", labelText: e, onPressed: "pick", arg: String(i) })) });
   } else if (p.link && !p.link.used) {
     children.push(...linkNodes(p));
   } else if (!p.me.of) {
     children.push(Banner("info", both("Sin teléfono vinculado: solo reacciones", "No phone linked: reactions only"), Action(tx("linkStart"), busyTap("linkStart"))));
   }
-  if (p.role === "guest") {
-    children.push({
-      type: "Row", wrap: true, gap: 4,
-      children: [
-        { type: "Switch", key: "follow", value: p.follow, labelText: T.follow[0], labelTextEn: T.follow[1], onChanged: "follow", span: 8 },
-        Btn("TextButton", tx("sync"), "sync", { span: 4 }),
-      ],
-    });
-  }
-  for (const m of pendingOwn(p, now)) children.push(Text(both(`${displayName(p.me.name)}: ${m.x} (enviando…)`, `${displayName(p.me.name, true)}: ${m.x} (sending…)`), { color: "muted" }));
-  if (p.stuck) children.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar. Prueba «Sincronizar» en un momento.", "We cannot catch up with the host: your video is slow to load. Try “Sync” in a moment."), { style: "caption", color: "warning" }));
-  else if (p.correctedTo !== null && now - p.correctedAt < 8000) children.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
-  children.push(chatList(p));
   return children;
 }
 
@@ -1730,7 +1953,11 @@ function clockText(ms) {
 
 function roomTab(p, ctx) {
   const rows = memberRows(p.roster);
-  const children = [Text(tx("members"), { style: "h5" })];
+  const children = [];
+  const seat = p.me.role === "seat" && p.code;
+  if (seat) children.push(...roomLine(p, ctx));
+  if (p.role === "guest") children.push({ type: "Switch", key: "follow", value: p.follow, labelText: T.follow[0], labelTextEn: T.follow[1], onChanged: "follow" });
+  children.push(Text(tx("members"), { style: "h5" }));
   for (const r of rows) {
     const marks = (r.phone ? " 📱" : "") + (r.tv ? " 📺" : "");
     const line = [Text(both(`${displayName(r.name)}${marks}`, `${displayName(r.name, true)}${marks}`), { flex: 1 })];
@@ -1739,77 +1966,155 @@ function roomTab(p, ctx) {
   }
   const doors = 1 + Object.keys(p.backups).length;
   children.push(Text(both(`Puertas abiertas: ${doors}`, `Open doors: ${doors}`), { style: "caption", color: "muted" }));
-  if (p.me.role === "seat" && p.code) {
+  if (seat) {
     const words = p.hostWords;
     children.push({ type: "Divider" });
-    children.push(Text(tx("invite"), { style: "h5" }));
-    children.push(Text(both(`Palabras: ${words}`, `Words: ${words}`)));
-    children.push(Text(both(`Código: ${groupCode(p.code)}`, `Code: ${groupCode(p.code)}`), { bold: true }));
-    if (p.role === "host") children.push(...copyButtons(p, ctx));
-    children.push({ type: "QrImage", value: partyQrText(words, p.code), labelText: "Código QR de la sala", labelTextEn: "The room's QR code", size: "small" });
+    children.push({ type: "QrImage", value: roomUrlOf(words, p.code), labelText: "Código QR de la sala", labelTextEn: "The room's QR code", size: "small" });
     children.push(Text(tx("inviteInfo"), { style: "caption", color: "muted" }));
+    // The fallback when the short-code service is down: the room's own words and code, collapsed.
+    children.push(Btn("TextButton", both("Opciones avanzadas", "Advanced options"), { ui: [{ toggle: "advanced" }] }, { key: "btnAdvanced" }));
+    children.push({
+      type: "Column", key: "advanced", hidden: true, gap: 4,
+      children: [
+        Text(both(`Palabras: ${words}`, `Words: ${words}`)),
+        Text(both(`Código de la sala: ${groupCode(p.code)}`, `Room code: ${groupCode(p.code)}`), { bold: true }),
+        Text(both("Sirven si el servicio del código corto no responde: «Entrar con palabras y código».", "They work if the short-code service does not answer: “Join with words and code”."), { style: "caption", color: "muted" }),
+      ],
+    });
     if (p.myWords && p.myWords !== words) children.push(Text(both(`Tu puerta de respaldo: ${p.myWords}`, `Your backup door: ${p.myWords}`), { style: "caption" }));
     if (p.role === "guest" && p.want.includes(p.me.mid) && !p.myWords) {
       children.push(Text(tx("backupInfo"), { style: "caption", color: "muted" }));
       children.push(Btn("TextButton", tx("openBackup"), busyTap("openBackup"), { key: "btnBackup" }));
     }
-    children.push(Btn("TextButton", tx("addDevice"), busyTap("addDevice"), { key: "btnAddDevice", devices: ["phone"] }));
+    // «Agregar dispositivo» scans the TV's QR: never on a TV.
+    if (!isTv(ctx)) children.push(Btn("TextButton", tx("addDevice"), busyTap("addDevice"), { key: "btnAddDevice", devices: ["phone"] }));
   }
   if (p.link && !p.link.used) children.push(...linkNodes(p));
   // A host alone that knows other doors may look for the room there (the «alone» notice only shows after a real departure).
-  if (p.role === "host" && !p.roster.some((m) => m.id !== "host") && Object.keys(p.leftDoors).length && !p.probe) {
+  if (p.role === "host" && !p.roster.some((m) => m.id !== "host") && Object.keys(p.leftDoors).length && !p.probe && !(p.banner && p.banner.kind === "alone")) {
     children.push(Btn("TextButton", both("Buscar la sala en otra puerta", "Look for the room at another door"), busyTap("findRoom"), { key: "btnFind" }));
   }
   children.push({ type: "Divider" });
+  children.push(Btn("TextButton", both("Cambiar mi nombre", "Change my name"), { event: "renameOpen" }, { key: "btnRename" }));
   children.push(Btn("TextButton", tx("leave"), "leave", { confirm: T.leaveConfirm[0], confirmEn: T.leaveConfirm[1] }));
   return children;
 }
 
 function linkNodes(p) {
   return [
-    Text(tx("linkInfo")),
     { type: "QrImage", value: linkQrText(p.link.words, p.link.code, p.link.exp), labelText: "Código para vincular el teléfono", labelTextEn: "Code to link the phone", size: "medium" },
+    Text(tx("linkInfo")),
     Text(both("Vence a los 5 minutos.", "It expires after 5 minutes."), { style: "caption", color: "muted" }),
-    Btn("TextButton", tx("linkCancel"), "linkCancel"),
+    Btn("TextButton", tx("linkCancel"), "linkCancel", { key: "btnLinkCancel" }),
   ];
 }
 
-function idleNodes(p, ctx) {
-  // The panel's own title already says «Fiesta»: the body starts with what it is for.
-  const children = [Text(tx("intro")), Text(tx("sameSource"), { style: "caption", color: "muted" })];
-  if (p.pending) {
-    children.push(Banner("success", both(`Teléfono vinculado: ${displayName(p.pending.name)}`, `Phone linked: ${displayName(p.pending.name, true)}`), Action(tx("enter"), busyTap("enterParty"))));
-    return children;
-  }
-  if (p.link && !p.link.used) { children.push(...linkNodes(p)); return children; }
-  children.push({ type: "TextField", key: "myName", labelText: T.yourName[0], labelTextEn: T.yourName[1], maxLength: LIMITS.nameChars, value: p.me.name });
-  children.push(Btn("ElevatedButton", tx("create"), busyTap("create"), { key: "btnCreate" }));
-  children.push(Btn("TextButton", tx("joinToggle"), { ui: [{ toggle: "joinForm" }] }));
-  children.push({
-    type: "Form", key: "joinForm", hidden: true, onSubmitted: busyTap("join"),
-    children: [
-      { type: "TextField", key: "joinPaste", labelText: "Pega aquí la invitación", labelTextEn: "Paste the invitation here", maxLength: 1000, multiline: true },
-      Btn("TextButton", both("Leer la invitación", "Read the invitation"), "readInvite", { key: "btnReadInvite" }),
-      ...inviteFeedback(ctx),
-      { type: "TextField", key: "joinWords", labelText: T.words[0], labelTextEn: T.words[1], maxLength: 500, required: true },
-      { type: "TextField", key: "joinCode", labelText: T.code[0], labelTextEn: T.code[1], maxLength: 20 },
-      { type: "ElevatedButton", key: "btnJoin", labelText: T.enter[0], labelTextEn: T.enter[1], submit: true },
-    ],
-  });
-  children.push(Btn("TextButton", tx("scan"), busyTap("scanJoin"), { key: "btnScan", devices: ["phone"] }));
-  children.push(Btn("TextButton", tx("linkStart"), busyTap("linkStart"), { key: "btnLink", devices: ["tv"] }));
-  return children;
+/** Whether the tab is drawn on a TV (the drawer or the pinned panel there): no clipboard, no camera. */
+const isTv = (ctx) => Boolean(ctx && ctx.device === "tv");
+
+/**
+ * Not in a room: a step-by-step wizard, one decision per screen (the step lives in Kino's panel state, `wizStep`).
+ * - home: «Crear sala» and «Unirme a sala», nothing else.
+ * - c1: «¿Cómo te llamas?» (the last name used) + «Crear sala» + «Atrás».
+ * - j1: «Código de la sala» (5 digits) + «Siguiente» (asks the service) + the other ways in (phone: «Pegar invitación»,
+ *   «Escanear QR»; TV: «Vincular con mi teléfono») + «Entrar con palabras y código» + «Atrás».
+ * - j1b: the words and the room code + «Siguiente» + «Atrás»; jp (phones): paste an invitation + «Leer la invitación» + «Atrás».
+ * - j2: «¿Cómo te llamas?» + «Entrar» + «Atrás» (to j1, the typed code kept): the name is asked after the code was checked.
+ */
+export const WIZ_STEPS = ["home", "c1", "j1", "j1b", "jp", "j2"];
+
+/** The step shown: Kino's panel state says it; a TV never shows the paste step; j2 needs a checked target. */
+export function wizStepOf(ctx) {
+  const st = isObj(ctx && ctx.state) ? ctx.state : {};
+  let step = WIZ_STEPS.includes(st.wizStep) ? st.wizStep : "home";
+  if (step === "jp" && isTv(ctx)) step = "j1";
+  if (step === "j2" && !targetOf(st.joinTarget)) step = "j1";
+  return step;
 }
 
-/** What a read invitation shows before joining: the words and the code to confirm, or why nothing was found. */
-function inviteFeedback(ctx) {
-  const st = isObj(ctx && ctx.state) ? ctx.state : {};
-  if (isObj(st.invite) && typeof st.invite.words === "string" && typeof st.invite.code === "string") {
-    return [Text(both(`Vas a entrar a: ${st.invite.words} · código ${groupCode(st.invite.code)}. Toca «Entrar».`, `You are about to join: ${st.invite.words} · code ${groupCode(st.invite.code)}. Tap “Join”.`), { bold: true })];
-  }
-  if (st.inviteError === true) return [Text(both("No encuentro las palabras o el código", "I cannot find the words or the code"), { color: "error" })];
-  return [];
+/** A join target kept in the panel state between j1/j1b and j2, re-checked (the state comes back from Kino). */
+function targetOf(t) {
+  if (!isObj(t)) return null;
+  const words = normWords(t.words);
+  const code = normCode(t.code);
+  const short = t.short === undefined || t.short === null ? null : normShort(t.short);
+  return words && code ? { words, code, short } : null;
 }
+
+
+const wizTo = (step) => ({ event: "wiz", arg: step });
+const backTo = (step) => Btn("TextButton", tx("back"), wizTo(step), { key: "btnBack" });
+
+function idleNodes(p, ctx) {
+  const st = isObj(ctx && ctx.state) ? ctx.state : {};
+  const tv = isTv(ctx);
+  if (p.pending) {
+    return [Banner("success", both(`Teléfono vinculado: ${displayName(p.pending.name)}`, `Phone linked: ${displayName(p.pending.name, true)}`), Action(tx("enter"), busyTap("enterParty")))];
+  }
+  if (p.link && !p.link.used) return linkNodes(p);
+  const step = wizStepOf(ctx);
+  const heading = (t) => Text(t, { style: "h5" });
+  switch (step) {
+    case "c1":
+      return [
+        heading(both("¿Cómo te llamas?", "What's your name?")),
+        { type: "TextField", key: "myName", labelText: T.yourName[0], labelTextEn: T.yourName[1], maxLength: LIMITS.nameChars, value: p.me.name },
+        Btn("ElevatedButton", tx("create"), busyTap("create"), { key: "btnCreate" }),
+        backTo("home"),
+      ];
+    case "j1":
+      return [
+        heading(both("Código de la sala", "Room code")),
+        { type: "TextField", key: "joinShortCode", kind: "number", labelText: "Código (5 números)", labelTextEn: "Code (5 digits)", maxLength: 7, value: typeof st.shortTyped === "string" ? st.shortTyped : "" },
+        Btn("ElevatedButton", both("Siguiente", "Next"), busyTap("lookupShort"), { key: "btnLookup" }),
+        ...(tv
+          ? [Btn("TextButton", tx("linkStart"), busyTap("linkStart"), { key: "btnLink" })]
+          : [Btn("TextButton", both("Pegar invitación", "Paste invitation"), wizTo("jp"), { key: "btnPaste" }), Btn("TextButton", both("Escanear QR", "Scan QR"), busyTap("scanJoin"), { key: "btnScan" })]),
+        Btn("TextButton", both("Entrar con palabras y código", "Join with words and code"), wizTo("j1b"), { key: "btnWords" }),
+        backTo("home"),
+      ];
+    case "j1b":
+      return [
+        heading(both("Palabras y código de la sala", "The room's words and code")),
+        { type: "TextField", key: "joinWords", labelText: T.words[0], labelTextEn: T.words[1], maxLength: tv ? 80 : 500 },
+        { type: "TextField", key: "joinCode", ...(tv ? { kind: "number" } : {}), labelText: "Código de la sala", labelTextEn: "Room code", maxLength: tv ? 12 : 20 },
+        Btn("ElevatedButton", both("Siguiente", "Next"), busyTap("wordsNext"), { key: "btnWordsNext" }),
+        backTo("j1"),
+      ];
+    case "jp":
+      return [
+        heading(both("Pegar invitación", "Paste the invitation")),
+        { type: "TextField", key: "joinPaste", labelText: "Pega aquí la invitación", labelTextEn: "Paste the invitation here", maxLength: 1000, multiline: true },
+        Btn("ElevatedButton", both("Leer la invitación", "Read the invitation"), busyTap("readInvite"), { key: "btnReadInvite" }),
+        ...(st.inviteError === true ? [Text(both("No encuentro las palabras o el código", "I cannot find the words or the code"), { color: "error" })] : []),
+        backTo("j1"),
+      ];
+    case "j2": {
+      const t = targetOf(st.joinTarget);
+      const what = t.short ? both(`Código ${groupShort(t.short)}`, `Code ${groupShort(t.short)}`) : both(`Sala ${t.words}`, `Room ${t.words}`);
+      return [
+        heading(both("¿Cómo te llamas?", "What's your name?")),
+        { type: "TextField", key: "myName", labelText: T.yourName[0], labelTextEn: T.yourName[1], maxLength: LIMITS.nameChars, value: p.me.name },
+        Btn("ElevatedButton", tx("enter"), busyTap("joinTarget"), { key: "btnJoinTarget" }),
+        Text(what, { style: "caption", color: "muted" }),
+        backTo("j1"),
+      ];
+    }
+    default:
+      // A saved name: «Crear sala» creates at once (the name is asked only when there is none).
+      return [
+        Btn("ElevatedButton", tx("create"), p.me.name ? busyTap("create") : wizTo("c1"), { key: p.me.name ? "btnCreate" : "btnHomeCreate" }),
+        Btn("ElevatedButton", both("Unirme a sala", "Join a room"), wizTo("j1"), { key: "btnHomeJoin" }),
+      ];
+  }
+}
+
+/** The control a step opens on (focus): its field, else its first button. */
+export function wizFocus(step) {
+  return { home: "btnHomeJoin", c1: "myName", j1: "joinShortCode", j1b: "joinWords", jp: "joinPaste", j2: "myName" }[step] || null;
+}
+
+
 
 /** The tab's result (screen format), or the legacy panel when Kino's plugin screens are off. */
 export function view(p, ctx, now, player = null) {
@@ -1817,24 +2122,95 @@ export function view(p, ctx, now, player = null) {
   if (!features.includes("screen")) return { title: T.title[0], titleEn: T.title[1], elements: [{ type: "text", text: T.noScreens[0], textEn: T.noScreens[1] }] };
   const inRoom = p.phase === "party";
   const base = { format: "screen", title: T.title[0], titleEn: T.title[1], ...(inRoom || p.link ? { refreshMs: LIMITS.refreshMs } : {}), ...(player ? { player } : {}) };
-  const top = [...busyRows()];
-  const err = errorBanner(ctx);
-  if (err) top.push(err);
-  if (!inRoom) return { ...base, root: { type: "Column", gap: 8, padding: 8, children: [...top, ...idleNodes(p, ctx)] } };
+  const errNow = isObj(ctx.state) && isObj(ctx.state.error) ? ctx.state.error : null;
+  const labelFor = (event) => {
+    const ev = BUSY[event] ? event : errNow && BUSY[errNow.retry] ? errNow.retry : null;
+    if (ev === "lookupShort" && p.me.name) return "busyJoin"; // with a saved name the lookup joins at once
+    return ev ? BUSY[ev].label : "busyJoin";
+  };
+  const done = (result) => ({ ...result, root: addWaitRows(result.root, labelFor) });
+  if (!inRoom) {
+    return done({ ...base, root: { type: "Column", gap: 8, padding: 8, children: [...errorNodes(ctx), ...idleNodes(p, ctx)] } });
+  }
+  const top = errorNodes(ctx, !recoveryScreen(p));
+  // In-room recovery (the host left, this device was dropped, waiting at the successor's door…): a screen of its own with the
+  // explanation, ONE primary button (the banner's) and «Salir de la sala»; no inputs, no tabs.
+  if (isObj(ctx.state) && ctx.state.renaming === true && !recoveryScreen(p)) {
+    return done({
+      ...base,
+      root: {
+        type: "Column", gap: 8, padding: 8,
+        children: [
+          Text(both("¿Cómo te llamas?", "What's your name?"), { style: "h5" }),
+          { type: "TextField", key: "myName", labelText: T.yourName[0], labelTextEn: T.yourName[1], maxLength: LIMITS.nameChars, value: p.me.name },
+          Btn("ElevatedButton", both("Guardar", "Save"), "rename", { key: "btnRenameSave" }),
+          Text(both("Se usa en esta sala y en las próximas.", "It is used in this room and the next ones."), { style: "caption", color: "muted" }),
+          Btn("TextButton", tx("back"), { event: "renameClose" }, { key: "btnBack" }),
+        ],
+      },
+    });
+  }
+  if (recoveryScreen(p)) {
+    return done({
+      ...base,
+      root: { type: "Column", gap: 8, padding: 8, children: [...top, ...recoveryNodes(p, now)] },
+    });
+  }
   const asked = ctx.tab === "room" || ctx.tab === "chat" ? ctx.tab : isObj(ctx.state) ? ctx.state.tab : null;
   const tab = asked === "room" ? "room" : "chat";
-  const head = [Text(both(`Sala de ${displayName(p.hostName)}`, `${displayName(p.hostName, true)}'s room`), { style: "h5" })];
+  const head = [headerRow(p, ctx)];
   const pb = partyBanner(p, now);
   if (pb) head.push(pb);
   if (p.hold && p.role === "guest") head.push(Banner("info", both("Pausaste o seguiste por tu cuenta: la sala sigue.", "You paused or resumed yourself: the room goes on."), Action(tx("resync"), "resync")));
   const mb = matchBanner(p, ctx);
   if (mb) head.push(mb);
-  return {
+  return done({
     ...base,
     tabs: [{ id: "chat", label: T.chatTab[0], labelEn: T.chatTab[1] }, { id: "room", label: T.roomTab[0], labelEn: T.roomTab[1] }],
     tab,
     root: { type: "Column", gap: 8, padding: 8, children: [...top, ...head, ...(tab === "room" ? roomTab(p, ctx) : chatTab(p, now, ctx))] },
+  });
+}
+
+/**
+ * The room's header row: a short status on the left (who hosts, whether this guest watches the same), and for a guest the
+ * «Sincronizar» icon on the right (its label is for screen readers; its progress row goes under this row).
+ */
+function headerRow(p, ctx) {
+  const m = p.role === "guest" ? mediaMatch(ctx, p.media) : null;
+  const count = p.roster.length;
+  const status = p.role === "host"
+    ? both(`Eres el anfitrión · ${count} ${count === 1 ? "persona" : "personas"}`, `You host · ${count} ${count === 1 ? "person" : "people"}`)
+    : both(`Anfitrión: ${displayName(p.hostName)}${m && m.ok ? " · ✓ Viendo lo mismo" : ""}`, `Host: ${displayName(p.hostName, true)}${m && m.ok ? " · ✓ Watching the same" : ""}`);
+  return {
+    type: "Row", key: "headerRow", gap: 4, crossAxisAlignment: "center",
+    children: [
+      Text(status, { style: "caption", flex: 1 }),
+      ...(p.role === "guest" ? [{ type: "IconButton", key: "btnSync", icon: "sync", labelText: "Sincronizar", labelTextEn: "Sync", onPressed: busyTap("sync") }] : []),
+    ],
   };
+}
+
+/** A recovery screen's content: the explanation in ordinary text, one ordinary button, and «Salir de la sala». */
+function recoveryNodes(p, now) {
+  const b = partyBanner(p, now);
+  const out = [];
+  const leave = { confirm: T.leaveConfirm[0], confirmEn: T.leaveConfirm[1] };
+  // The one way on is always «btnRecover», the first control (the D-pad lands there); «Salir de la sala» after it, unless
+  // leaving is that way on (the room is over).
+  const leaves = Boolean(b && b.action && b.action.onTap === "leave");
+  if (b) {
+    out.push(Text(both(b.text, b.textEn), { style: "p" }));
+    if (b.action) out.push(Btn("ElevatedButton", both(b.action.label, b.action.labelEn), b.action.onTap, { key: "btnRecover", ...(leaves ? leave : {}) }));
+  }
+  if (!leaves) out.push(Btn("TextButton", tx("leave"), "leave", { key: "btnLeave", ...leave }));
+  return out;
+}
+
+/** Whether the room view is a single-purpose recovery screen (waiting, dropped, a new host to follow, the room over…). */
+export function recoveryScreen(p) {
+  if (p.awaiting) return true;
+  return Boolean(p.banner && ["newHost", "lost", "redirect", "dropped", "noAnswer", "cantCheck", "waitOthers", "takeOver", "moved", "closedMine", "ended", "linked"].includes(p.banner.kind));
 }
 
 // ---------- the guest's player ----------
@@ -1972,7 +2348,49 @@ export async function panelActionAt(event, ctx, now) {
   }
   saveParty(k.storage, p, now, logOf(k));
   if (BUSY[name0]) answer = { ...(answer || {}), ui: [...settle(name0), ...((answer && answer.ui) || [])].slice(0, 8) };
-  return answer;
+  return withFocus(answer, p, ctx, now);
+}
+
+/**
+ * Every answer that changes what is on screen names where the D-pad goes next (`focus`), a control that exists in the tree it
+ * leads to: the one it asked for when it is there, else the first useful control of the new view (its field, else its primary
+ * button), so focus is never lost when the pressed control disappears (a step change, a loading done, an error, a room joined).
+ */
+export function withFocus(answer, p, ctx, now) {
+  if (!isObj(answer) || answer.close) return answer;
+  const merged = { ...(isObj(ctx && ctx.state) ? ctx.state : {}) };
+  if (isObj(answer.state)) for (const [key, v] of Object.entries(answer.state)) { if (v === null) delete merged[key]; else merged[key] = v; }
+  const tree = view(p, { ...ctx, features: ["screen"], state: merged, tab: merged.tab || ctx.tab }, now);
+  const keys = focusables(tree.root || { children: [] });
+  if (!keys.length) return answer;
+  const fields = focusFields(tree.root || { children: [] });
+  const want = typeof answer.focus === "string" && keys.includes(answer.focus) ? answer.focus : fields[0] || keys[0];
+  return { ...answer, focus: want };
+}
+
+/** The keyed text fields of a tree, in reading order. */
+function focusFields(root) {
+  const out = [];
+  const walk = (n) => {
+    if (!isObj(n)) return;
+    if (typeof n.key === "string" && !n.hidden && n.type === "TextField") out.push(n.key);
+    for (const c of Array.isArray(n.children) ? n.children : []) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
+/** The keyed controls of a tree in reading (D-pad) order: fields, buttons and switches (never a progress row). */
+export function focusables(root) {
+  const out = [];
+  const walk = (n) => {
+    if (!isObj(n)) return;
+    if (typeof n.key === "string" && !n.key.startsWith("busy.") && !n.hidden && ["TextField", "ElevatedButton", "TextButton", "Button", "IconButton", "Switch"].includes(n.type)) out.push(n.key);
+    for (const c of Array.isArray(n.children) ? n.children : []) walk(c);
+    if (Array.isArray(n.items)) for (const c of n.items) walk(c);
+  };
+  walk(root);
+  return out;
 }
 
 const lost = (e) => ["room_unreachable", "room_closed", "room_denied"].includes(codeOf(e));
@@ -1982,9 +2400,9 @@ async function act(k, p, event, ctx, values, name, now) {
     case "create": {
       if (p.phase === "party") return null;
       if (name) k.storage.set(NAME, name);
-      // A short code: the words are the address, 4 digits keep out whoever does not have them (Kino closes a room after 30
-      // wrong joins). A Kino without `codeDigits` ignores it and gives 12 digits, which works the same.
-      const opened = await k.room.open({ codeDigits: LIMITS.partyCodeDigits, ttlMin: LIMITS.roomTtlMin, max: LIMITS.maxMembers, name: name || undefined });
+      // Kino's default 12-digit code: nobody types it (people type the service's 5-digit code, or scan the QR).
+      const opened = await k.room.open({ ttlMin: LIMITS.roomTtlMin, max: LIMITS.maxMembers, name: name || undefined });
+      await dropShort(k, p); // a code of an earlier room of this device is revoked before the new one is made
       Object.assign(p, newParty(name));
       p.cursors = { joined: 0, hosted: 0 };
       p.phase = "party"; p.role = "host"; p.code = opened.code; p.hostWords = opened.words; p.myWords = opened.words;
@@ -1994,13 +2412,96 @@ async function act(k, p, event, ctx, values, name, now) {
       p.roster = [{ id: "host", name, js: 1, role: "seat", of: null }];
       p.nextJs = 2; p.media = mediaOf(ctx); p.snapDue = true; p.forceState = "start";
       await pump(k.room, p, ctx, now);
-      return { ...toast(both("Sala creada: comparte las palabras y el código", "Room created: share the words and the code"), "success"), state: { tab: "room" } };
+      const got = await askShort(k, p, now);
+      return got
+        ? { ...toast(both(`Sala creada: comparte el código ${groupShort(p.short)}`, `Room created: share the code ${groupShort(p.short)}`), "success"), state: { tab: "chat", wizStep: "home" } }
+        : { ...toast(both("Sala creada, pero sin código corto: usa el QR o las opciones avanzadas", "Room created, without a short code: use the QR or the advanced options"), "warning"), state: { tab: "chat", wizStep: "home" } };
+    }
+    case "shortCode": {
+      if (p.role !== "host" || p.phase !== "party") return null;
+      if (await askShort(k, p, now)) return toast(both(`Código: ${groupShort(p.short)}`, `Code: ${groupShort(p.short)}`), "success");
+      return failed("shortCode", both("No pude crear el código corto; reintenta", "I could not create the short code; try again"));
+    }
+    case "joinShort": {
+      const v = isObj(event.value) ? event.value : values;
+      const short = normShort(v.joinShortCode);
+      if (!short) return invalid(both("Escribe los 5 números del código", "Type the code's 5 digits"));
+      const found = await lookupShortCode((url, o) => k.fetch(url, o), short);
+      if (!found.ok) {
+        if (found.error === "notFound") return failed("joinShort", both("Ese código no existe o ya venció", "That code does not exist or has expired"));
+        if (found.error === "network") return failed("joinShort", both("No pude consultar el código; reintenta", "I could not look the code up; try again"));
+        return invalid(both("Ese código no es válido", "That code is not valid"));
+      }
+      if (name) k.storage.set(NAME, name);
+      const answer = await joinAndGreet(k, p, found.words, found.code, name, ctx, now);
+      p.short = short; // known to this guest: masked if typed into the chat
+      return answer;
+    }
+    case "renameOpen":
+      return { state: { renaming: true }, focus: "myName" };
+    case "renameClose":
+      return { state: { renaming: false }, focus: "btnRename" };
+    case "rename": {
+      const nn = scrubName(typeof values.myName === "string" ? values.myName : "");
+      if (!nn) return toast(both("Escribe un nombre", "Type a name"), "warning");
+      k.storage.set(NAME, nn);
+      p.me.name = nn;
+      if (p.phase === "party") {
+        if (p.role === "host") {
+          p.hostName = nn;
+          p.roster = p.roster.map((r) => (r.id === "host" ? { ...r, name: nn } : r));
+          p.snapDue = true;
+        } else if (p.handle) enqueue(p, "joined", helloOf(p));
+        await pump(k.room, p, ctx, now);
+      }
+      return { ...toast(both(`Ahora te llamas ${nn}`, `Your name is now ${nn}`), "success"), state: { renaming: false } };
+    }
+    case "wiz": {
+      // A pure step change: Kino's panel state, and the step's first control focused.
+      const to = WIZ_STEPS.includes(event.arg) ? event.arg : "home";
+      if (p.phase === "party") return null;
+      return { state: { wizStep: to, error: null, inviteError: false, ...(to === "home" ? { joinTarget: null, shortTyped: null } : {}) }, focus: wizFocus(to) };
+    }
+    case "lookupShort": {
+      // j1 «Siguiente»: the code is checked at the service before the name is asked.
+      const typed = typeof values.joinShortCode === "string" ? values.joinShortCode : "";
+      const short = normShort(typed);
+      if (!short) return invalid(both("Escribe los 5 números del código", "Type the code's 5 digits"));
+      const found = await lookupShortCode((url, o) => k.fetch(url, o), short);
+      if (!found.ok) {
+        const msg = found.error === "notFound" ? both("Ese código no existe o ya venció", "That code does not exist or has expired")
+          : found.error === "network" ? both("No pude consultar el código; reintenta", "I could not look the code up; try again")
+            : both("Ese código no es válido", "That code is not valid");
+        // A lookup that failed (the service, or a code it does not know yet) can be retried; a code that is not valid cannot.
+        const again = found.error === "network" || found.error === "notFound";
+        return { state: { error: { ...msg, retry: again ? "lookupShort" : null }, shortTyped: short }, ...(again ? { focus: "btnRetry" } : {}) };
+      }
+      return toNameOrJoin(k, p, { words: found.words, code: found.code, short }, ctx, now, { shortTyped: short });
+    }
+    case "wordsNext": {
+      // j1b «Siguiente»: the words and the room code (or a pasted invitation in the words field), checked here.
+      const words = normWords(values.joinWords);
+      const code = normCode(values.joinCode);
+      const got = words && code ? { words, code } : parseInvitation(`${typeof values.joinWords === "string" ? values.joinWords : ""}\n${typeof values.joinCode === "string" ? values.joinCode : ""}`);
+      if (got.short) return { state: { wizStep: "j1", shortTyped: got.short, error: null }, focus: "btnLookup" };
+      if (got.error) return { state: { error: { es: "No encuentro las palabras o el código", en: "I cannot find the words or the code", retry: null } } };
+      return toNameOrJoin(k, p, { words: got.words, code: got.code, short: null }, ctx, now);
+    }
+    case "joinTarget": {
+      // j2 «Entrar»: the checked room, with the name.
+      const target = targetOf(isObj(ctx.state) ? ctx.state.joinTarget : null);
+      if (!target) return { state: { wizStep: "j1" } };
+      if (name) k.storage.set(NAME, name);
+      const answer = await joinAndGreet(k, p, target.words, target.code, name, ctx, now);
+      if (target.short) p.short = target.short;
+      return { ...answer, state: { ...(answer.state || {}), wizStep: "home", joinTarget: null, shortTyped: null } };
     }
     case "readInvite": {
-      // Fills the two fields from a pasted invitation and shows them back; joining stays the person's «Entrar».
+      // jp: a pasted invitation; a short code goes back to j1 filled in, words + code go on to the name.
       const got = parseInvitation(typeof values.joinPaste === "string" ? values.joinPaste : "");
-      if (got.error) return { state: { invite: null, inviteError: true } };
-      return { ui: [{ set: { key: "joinWords", value: got.words } }, { set: { key: "joinCode", value: got.code } }], state: { invite: got, inviteError: false } };
+      if (got.error) return { state: { inviteError: true } };
+      if (got.short) return { state: { wizStep: "j1", shortTyped: got.short, inviteError: false }, focus: "btnLookup" };
+      return toNameOrJoin(k, p, { words: got.words, code: got.code, short: null }, ctx, now, { inviteError: false });
     }
     case "join": {
       const v = isObj(event.value) ? event.value : values;
@@ -2009,6 +2510,7 @@ async function act(k, p, event, ctx, values, name, now) {
       if (!words || !code) {
         // The whole invitation pasted into the words field: read it, fill the fields, and let the person confirm first.
         const got = parseInvitation(`${typeof v.joinWords === "string" ? v.joinWords : ""}\n${typeof v.joinCode === "string" ? v.joinCode : ""}`);
+        if (got.short) return { ui: [{ set: { key: "joinShortCode", value: got.short } }], state: { invite: got, inviteError: false } };
         if (!got.error) return { ui: [{ set: { key: "joinWords", value: got.words } }, { set: { key: "joinCode", value: got.code } }], state: { invite: got, inviteError: false } };
         return failed("join", both("No encuentro las palabras o el código", "I cannot find the words or the code"));
       }
@@ -2018,14 +2520,16 @@ async function act(k, p, event, ctx, values, name, now) {
     case "scanJoin": {
       const text = await scanOrExplain(k, tx("scanTitle"));
       if (isObj(text)) return text;
-      const q = parsePartyQr(text);
+      // The room's own address (no service needed), or an older room's words+code QR.
+      const q = parseRoomUrl(text.trim()) || parsePartyQr(text);
       if (!q) return toast(both("Ese código QR no es de una Fiesta", "That QR code is not a watch party's"), "error");
-      return joinAndGreet(k, p, q.words, q.code, name, ctx, now);
+      // As for a typed code: joined at once with a saved name, else the name step (j2).
+      return toNameOrJoin(k, p, { words: q.words, code: q.code, short: null }, ctx, now);
     }
     case "send": {
       if (p.phase !== "party" || p.me.role !== "seat") return null;
       const raw = typeof values.chatText === "string" ? values.chatText : typeof event.value === "string" ? event.value : "";
-      const text = maskCode(scrub(raw, LIMITS.textChars), p.code);
+      const text = maskCode(maskCode(scrub(raw, LIMITS.textChars), p.code), p.short);
       if (!text) return null;
       if (!chatAllowed({ me: p.myChat }, "me", now)) return toast(both("Espera un momento antes de enviar más", "Wait a moment before sending more"), "warning");
       p.myChat = [...p.myChat.filter((t) => now - t < LIMITS.chatWindowMs), now];
@@ -2044,16 +2548,9 @@ async function act(k, p, event, ctx, values, name, now) {
       p.myChat = [...p.myChat.filter((t) => now - t < LIMITS.chatWindowMs), now];
       if (p.role === "host") hostAddChat(p, { k: "emoji", by: "host", n: p.me.name, x: e }, now);
       else enqueue(p, "joined", { t: "emoji", e });
-      p.lastReaction = { at: now, n: p.me.name, x: e };
       await pump(k.room, p, ctx, now);
-      return null;
-    }
-    case "pick": {
-      const e = PICKER[Number(event.arg)];
-      if (!e) return null;
-      const cur = typeof values.chatText === "string" ? values.chatText : "";
-      const next = Array.from(cur + e).length <= LIMITS.textChars ? cur + e : cur;
-      return { ui: [{ set: { key: "chatText", value: next } }] };
+      // The palette closed under the pressed reaction: the D-pad goes back to the input (a display seat stays on its glyph).
+      return { focus: p.me.role === "display" ? "emoji" + Number(event.arg) : "chatText" };
     }
     case "follow":
       p.follow = event.value === true;
@@ -2092,6 +2589,7 @@ async function act(k, p, event, ctx, values, name, now) {
     }
     case "joinMoved":
       if (p.role !== "host" || !p.probe || !p.probe.found) return null;
+      await dropShort(k, p);
       stepDown(p, now);
       await pump(k.room, p, ctx, now);
       return toast(both("Te uniste a la sala", "You joined the room"), "success");
@@ -2111,8 +2609,9 @@ async function act(k, p, event, ctx, values, name, now) {
       if (p.handle) { try { await k.room.close({ session: p.handle }); } catch (e) { /* gone */ } }
       if (p.probe) { try { await k.room.close({ session: p.probe.handle }); } catch (e) { /* gone */ } }
       if (p.myWords || p.link) { try { await k.room.close({ session: "hosted" }); } catch (e) { /* gone */ } }
+      await dropShort(k, p); // after the close, so the close never waits on the service
       Object.assign(p, newParty(p.me.name));
-      return toast(both("Saliste de la sala", "You left the room"));
+      return { ...toast(both("Saliste de la sala", "You left the room")), state: { wizStep: "home", joinTarget: null, shortTyped: null, tab: null } };
     }
     case "linkStart": {
       if (p.link && !p.link.used) return null;
@@ -2247,11 +2746,45 @@ async function findRoom(k, p, now) {
   p.realLeftAt = 0;
   p.leftDoors = {};
   if (p.banner && p.banner.kind === "closedMine") {
+    await dropShort(k, p); // the room is over: its code too
     p.banner = { kind: "ended" };
     return toast(both("No hay otra puerta: tu sala terminó", "There is no other door: your room is over"), "warning");
   }
   p.banner = null;
   return toast(both("No encontramos otra puerta: tu sala sigue abierta aquí", "No other door answered: your room is still open here"));
+}
+
+/**
+ * A checked room: with a saved name, join it now (this same press); without one, the name step (j2) first, the room kept in
+ * Kino's panel state so «Atrás» returns to the code with what was typed.
+ */
+async function toNameOrJoin(k, p, target, ctx, now, extra = {}) {
+  if (!p.me.name) return { state: { ...extra, wizStep: "j2", joinTarget: target, error: null }, focus: "myName" };
+  const answer = await joinAndGreet(k, p, target.words, target.code, p.me.name, ctx, now);
+  if (target.short) p.short = target.short;
+  return { ...answer, state: { ...(answer.state || {}), wizStep: "home", joinTarget: null, shortTyped: null } };
+}
+
+/** The host asks the service for its room's short code (5 s, one retry). Never logs the address or the codes. */
+async function askShort(k, p, now) {
+  if (typeof k.fetch !== "function") { p.shortError = true; return false; }
+  await dropShort(k, p); // a code this device made before (another door, an earlier try) is revoked first
+  const got = await createShortCode((url, o) => k.fetch(url, o), p.hostWords, p.code, now);
+  if (!got.ok) { p.short = null; p.shortError = true; return false; }
+  p.short = got.short;
+  p.shortMine = true;
+  p.shortUntil = got.until;
+  p.shortError = false;
+  return true;
+}
+
+/** Revokes the short code this device created (if any) and forgets it; never blocks a close for more than 3 s, never fails it. */
+async function dropShort(k, p) {
+  const short = p.shortMine ? p.short : null;
+  p.short = null;
+  p.shortMine = false;
+  p.shortUntil = 0;
+  if (short) await revokeShortCode((url, o) => k.fetch(url, o), short);
 }
 
 async function joinAndGreet(k, p, words, code, name, ctx, now) {

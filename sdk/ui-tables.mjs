@@ -66,6 +66,7 @@ const ICON_TEXT = {
   visibility: "show, seen (an eye)", copy: "copy", arrow_back: "back, previous", arrow_forward: "forward, next",
   expand_more: "open, more (a chevron down)", expand_less: "close, less (a chevron up)", more_vert: "more actions (three dots)",
   filter_list: "filter", calendar: "a date, a calendar", schedule: "a time, scheduled (a clock)",
+  send: "send a message (a paper plane)", mood: "a reaction, a feeling (a smiley)",
 };
 const TEXT_STYLES = ["h1", "h2", "h3", "h4", "h5", "p", "caption", "label"];
 const ACTION = "action";
@@ -139,6 +140,9 @@ export const PROPS = {
     ["value", "string", "`\"\"`", "the starting text (what `state.inputs` holds wins)"],
     ["maxLength", `1 to ${n(L.maxTextChars)}`, n(L.maxTextChars), "also a form rule"],
     ["onSubmitted", ACTION, "none", "the keyboard's action (Enter); on the TV, the text dialog's accept"],
+    ["trailingIcon", `one of the ${ICONS.length} [icons](#icon-names)`, "none", "drawn inside the field's box at its end, tinted by `color`; never on a disabled field; needs `trailingLabel` and `onTrailingTap`, else the field is drawn without it (logged)"],
+    ["trailingLabel", `1 to ${L.maxTrailingLabelChars} characters`, "none", "what a screen reader says for the icon (`trailingLabelEn` in English); required with `trailingIcon`"],
+    ["onTrailingTap", ACTION, "none", "the icon's press: sent like `onSubmitted`, with the field's current text as `value` (a person's press); on the TV the icon is its own focus stop, Right from the field"],
   ],
   textArea: [
     ["multiline", "boolean", "`false`", "`true` (or `maxLines` above 1) makes a `TextField` several lines"],
@@ -412,7 +416,7 @@ const LIMIT_TEXT = {
   maxTextChars: "characters of a text", minEventIntervalMs: "ms between two events", callTimeoutMs: "ms per `screen` or `screenEvent` call",
   maxPopups: "pop-up open at a time", maxRefChars: "characters of a `ref` or an `arg`", maxSearchQueryChars: "characters of a `go.search` `q`",
   eventQueue: "events waiting", maxUiOps: "`ui` operations per action or answer", maxDialogButtons: "buttons in a dialog",
-  maxWeight: "largest `flex`", maxGridColumns: "largest `columns`", maxTestKeyChars: "characters of a `testKey`",
+  maxWeight: "largest `flex`", maxGridColumns: "largest `columns`", maxTestKeyChars: "characters of a `testKey`", maxTrailingLabelChars: "characters of a text field's `trailingLabel`",
   maxHeroButtons: "buttons in a `heroCard`", maxMenuItems: "items in a menu", maxTitles: "titles in a whole tree",
   maxFlatTitles: "titles in a rail or grid drawn all at once", maxPatternChars: "characters of a `pattern`",
   maxPatternRepeat: "largest count in a pattern", maxPatternStates: "steps of a pattern once counts are expanded",

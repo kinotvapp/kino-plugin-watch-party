@@ -39,7 +39,36 @@ function mailbox() {
 }
 
 export function createNet() {
-  return { endpoints: new Map(), down: new Set(), drop: null, n: 0, m: 0, sent: [], now: 0, devices: new Map() };
+  return { endpoints: new Map(), down: new Set(), drop: null, n: 0, m: 0, sent: [], now: 0, devices: new Map(), service: createShortService() };
+}
+
+/**
+ * The short-code service (url-code.kinotv.workers.dev) as it behaves today: POST `{ url }` -> 200 `{ code, url,
+ * expires_in_seconds }` (any URL accepted), GET `/<code>` -> 200 the same, an unknown code -> 404 JSON. `down` makes every
+ * call fail like a network error; `answer` (optional) replaces the next answers for hostile tests; `calls` records them.
+ */
+export function createShortService() {
+  const svc = { codes: new Map(), next: 41408, down: false, answer: null, calls: [] };
+  const response = (status, body) => ({
+    ok: status >= 200 && status < 300, status, url: "", headers: { "content-type": "application/json" },
+    text: () => (typeof body === "string" ? body : JSON.stringify(body)),
+    json: () => (typeof body === "string" ? JSON.parse(body) : JSON.parse(JSON.stringify(body))),
+  });
+  svc.fetch = async (url, o = {}) => {
+    svc.calls.push({ url, method: o.method || "GET", body: o.body, timeoutMs: o.timeoutMs, redirect: o.redirect });
+    if (svc.down) { const e = new Error("network"); e.code = "network"; throw e; }
+    if (svc.answer) return response(...svc.answer(url, o));
+    if (!String(url).startsWith("https://url-code.kinotv.workers.dev/")) { const e = new Error("host not declared"); e.code = "host_not_allowed"; throw e; }
+    if ((o.method || "GET") === "POST") {
+      const stored = o.body && o.body.json && o.body.json.url;
+      const code = String(svc.next++);
+      svc.codes.set(code, stored);
+      return response(200, { code, url: stored, expires_in_seconds: 28800 });
+    }
+    const code = String(url).slice("https://url-code.kinotv.workers.dev/".length);
+    return svc.codes.has(code) ? response(200, { code, url: svc.codes.get(code), expires_in_seconds: 28800 }) : response(404, { error: "not found" });
+  };
+  return svc;
 }
 
 /** One sender's budget (RoomRateWindow): perSecond, perMinute and bytesPerMinute. */
@@ -271,5 +300,9 @@ export function deviceKino(net, dev) {
       return dev.scans.length ? dev.scans.shift() : null;
     },
   };
-  return { apiVersion: 14, room, storage: memStorage(), qr, log: { info() {}, warn() {}, error() {} } };
+  const fetch = async (url, o) => {
+    if (dev.offline) { const e = new Error("network"); e.code = "network"; throw e; }
+    return net.service.fetch(url, o);
+  };
+  return { apiVersion: 14, room, storage: memStorage(), qr, fetch, log: { info() {}, warn() {}, error() {} } };
 }

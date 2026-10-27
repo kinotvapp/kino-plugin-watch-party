@@ -44,7 +44,7 @@ always with the same key: Kino refuses an update signed by another one.
 ## How it works
 
 <!-- sync:begin example-readme -->
-_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `58ac4a510` (with uncommitted changes). Do not edit by hand: change the example and sync again._
+_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `4bf80a00a`. Do not edit by hand: change the example and sync again._
 
 ### What Kino asks the person (the red lines are Kino's)
 
@@ -57,21 +57,27 @@ Ajustes. The plugin cannot word or hide them:
 - `room`: it opens a room that people reach over the Internet through this device, through Kino's own tunnel. The plugin
   never sees a URL, only the words and the code.
 - `qrScan`: Kino's own scanner opens only when the person presses a button; the plugin gets only the decoded text.
+- The declared host `url-code.kinotv.workers.dev` (the short-code service): listed in Kino's sheet with the other hosts. The
+  plugin reaches no other address (no `fetchHosts: "any"`), and never the room address the service returns.
 
 ### What the code protects, and what it does not
 
-- **The 4-digit code keeps strangers out, nothing more.** The words are the address and cannot be guessed; the code stops
-  whoever has the words but not the code: guessing is online only, Kino locks joins for a while after 5 wrong codes and
-  closes the room after 30. **The chat is NOT private from the tunnel provider**: with 4 digits, a captured message is
-  cracked offline in milliseconds. Keep the chat low-sensitivity. (The TV's one-use link endpoint keeps Kino's default 12
-  digits: it travels only in a QR.)
+- **The 5-digit short code is the only secret.** The service stores the room's words and room code for 8 hours under it, so
+  ANYONE who guesses or enumerates a valid code can join the room; rate limiting lives in the service, not in the plugin.
+  The «30 wrong codes close the room» protection only covers the words + code path, not the short code.
+- **The service sees things.** It is run by Kino's author and sees the IP addresses of the host and of the guests who look a
+  code up, and the room's address (words and room code). Revoking on close shortens that, it does not erase it.
+- **The chat is NOT private** from the tunnel provider nor from the service (which holds the room code). Keep it
+  low-sensitivity.
+- **If the service is down**, use the QR or «Opciones avanzadas» (words + room code) and «Entrar con palabras y código».
 - **Everyone who has the code is trusted with the room.** Anyone in the room can chat, react, hold a backup door and, if
   elected, host: the host's playback then moves the followers' players (within Kino's playerControl limits).
 - **The code travels in the `link` message.** «Agregar dispositivo» sends the room's words and code to the TV whose QR the
   phone scanned. Scan only your own TV's code: whoever showed that QR gets the room.
-- **The code is kept on the device** in `kino.storage` while the room lives (the entry expires with the room, at most 4 h 5
-  min; that store is part of the person's backup). The plugin never logs it and never puts it in the chat: a code typed into
-  a message is masked as «••••» where it stands alone (so a year like 2021 is not eaten by a 4-digit code).
+- **The codes are kept on the device** (the room code and the short code) in `kino.storage` while the room lives (the entry
+  expires with the room, at most 4 h 5 min; that store is part of the person's backup). The plugin never logs them, never
+  logs the service's address answer, and never puts them in the chat: a code typed into a message is masked as «••••» where
+  it stands alone (so a year like 2021 is not eaten by a short code).
 - **Identity is Kino's.** A member is the id Kino gave its session at the door it joined; no message names its sender, so
   nobody can speak as somebody else or take somebody's place. Ids are per door: after a change of host everyone joins the
   new door with a new id and takes a new place in the order, the new host first, the others in the order they come back
@@ -83,7 +89,7 @@ Ajustes. The plugin cannot word or hide them:
   affected.
 - **Names** are scrubbed (control, direction and invisible characters, stacked marks, blank-looking names), the marks the tab
   draws (📱 📺 ·) are removed from them, equal names are numbered («Bea (2)»), and the host is a badge, never part of a name.
-- The manifest declares the documentation host only because every plugin declares one; the plugin never fetches.
+- The only host the plugin reaches is the short-code service; the room's own address is only read out of its answer.
 
 ### Nobody is indispensable: backup doors and «elect + one tap»
 

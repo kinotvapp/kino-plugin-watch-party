@@ -786,7 +786,8 @@ class Reader {
         const onChange = this.actions(opt(o, "onChange"), o, type, "onChange");
         const onSubmit = this.actions(opt(o, "onSubmit"), o, type, "onSubmit");
         const field = this.fieldProps(o, type, maxLength);
-        return () => ({ label, hint, kind, maxLength, value, onChange, onSubmit, field });
+        const trailing = this.trailingOf(o, type);
+        return () => ({ label, hint, kind, maxLength, value, onChange, onSubmit, field, ...(type === "textInput" ? { trailing } : {}) });
       }
       case "dropdown": case "radioGroup": {
         const options = this.options(opt(o, "options"), type, "option");
@@ -1405,6 +1406,29 @@ class Reader {
       out.push({ label, icon: this.iconOf(e, `${who} item ${i}`), onTap });
     }
     return out;
+  }
+
+  /**
+   * Task 8y (PluginScreenOutput.trailingOf): a text field's trailing icon action { icon, label, onTap }, all three of
+   * `trailingIcon`, `trailingLabel` and `onTrailingTap`, or null. A bad or missing part leaves the field without the icon
+   * (logged, the field kept); a `textArea` takes none.
+   */
+  trailingOf(o, type) {
+    const raw = opt(o, "trailingIcon");
+    const tapRaw = opt(o, "onTrailingTap");
+    if (type !== "textInput") {
+      if (!absent(raw) || !absent(tapRaw)) this.log(`screen: ${type} trailingIcon works only on a one-line field, ignored`);
+      return null;
+    }
+    // No icon (in this width class: a per-size map may leave one out): the action has nothing to hang on, silently.
+    if (absent(raw)) return null;
+    if (typeof raw !== "string" || !ICONS.includes(raw)) { this.log(`screen: ${type} trailingIcon ${fmt(raw)} is not a Kino icon, ignored`); return null; }
+    const label = kotlinTrim(this.text(o, "trailingLabel"));
+    if (label === "") { this.log(`screen: ${type} trailingIcon needs a trailingLabel, ignored`); return null; }
+    if (label.length > LIMITS.maxTrailingLabelChars) { this.log(`screen: ${type} trailingLabel is over ${LIMITS.maxTrailingLabelChars} characters, its icon ignored`); return null; }
+    const onTap = this.actions(tapRaw, o, type, "onTrailingTap");
+    if (onTap === null) { this.log(`screen: ${type} trailingIcon needs a valid onTrailingTap, ignored`); return null; }
+    return { icon: raw, label, onTap };
   }
 
   iconOf(o, type) {

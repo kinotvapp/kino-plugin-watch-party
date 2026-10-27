@@ -768,7 +768,7 @@ type KinoIconName =
   | "refresh" | "sync" | "add" | "remove" | "delete" | "edit" | "search" | "close" | "check" | "share" | "play"
   | "pause" | "download" | "upload" | "link" | "open_in_new" | "home" | "person" | "lock" | "notifications"
   | "warning" | "error" | "visibility" | "copy" | "arrow_back" | "arrow_forward" | "expand_more" | "expand_less"
-  | "more_vert" | "filter_list" | "calendar" | "schedule";
+  | "more_vert" | "filter_list" | "calendar" | "schedule" | "send" | "mood";
 
 /**
  * The manifest's `panel` (apiVersion 9): the player's button. `label` 1 to 24 characters (`labelEn` the English one),
@@ -1184,7 +1184,13 @@ type KinoScreenNode =
   | (KinoScreenButton & { type: "ElevatedButton" | "TextButton" | "IconButton" })
   | (KinoScreenButton & { type: "Button"; variant?: KinoScreenResponsive<"primary" | "secondary" | "text" | "icon"> })
   /** A `TextField` with `maxLines` above 1 (in any size class) or `multiline: true` takes several lines. */
-  | (KinoScreenInput & KinoScreenTextRules & { type: "TextField"; kind?: KinoScreenInputKind; maxLength?: number; value?: string; maxLines?: KinoScreenResponsive<number>; multiline?: boolean; onSubmitted?: KinoScreenAction })
+  | (KinoScreenInput & KinoScreenTextRules & { type: "TextField"; kind?: KinoScreenInputKind; maxLength?: number; value?: string; maxLines?: KinoScreenResponsive<number>; multiline?: boolean; onSubmitted?: KinoScreenAction;
+      /**
+       * Task 8y: an icon inside the field's box at its end (one-line fields only), all three or none: `trailingIcon`,
+       * `trailingLabel` (what a screen reader says, at most 40 characters; `trailingLabelEn` in English) and `onTrailingTap`
+       * (sent like `onSubmitted`, the field's current text as the event's `value`). Never shown on a disabled field.
+       */
+      trailingIcon?: KinoScreenResponsive<KinoIconName>; trailingLabel?: string; trailingLabelEn?: string; onTrailingTap?: KinoScreenAction })
   | (KinoScreenInput & KinoScreenFieldRules & { type: "DropdownButton" | "RadioGroup"; options: KinoScreenOption[]; value?: string })
   /** `minLength` / `maxLength` count the chips picked. */
   | (KinoScreenInput & KinoScreenFieldRules & { type: "Chips"; options: KinoScreenOption[]; multiple?: boolean; value?: string | string[]; minLength?: number; maxLength?: number })
@@ -2521,7 +2527,8 @@ declare namespace kino {
    *   are in replaces it (moving to a backup endpoint). Publish a backup's `words` a few seconds after `open` (a fresh name
    *   takes a moment to resolve; `join` retries for 20 s).
    * - The room closes on `close`, at its TTL, if your plugin is removed, disabled or switched off, or if Kino stays in the
-   *   background 5 minutes. Guests silent for 2 minutes are dropped (`leave`).
+   *   background 30 minutes (while your room is hosted, Android shows Kino's notification «Sala abierta · N personas» with
+   *   «Cerrar sala» and keeps it alive meanwhile). Guests silent for 2 minutes are dropped (`leave`).
    * - Five wrong codes lock new joins for 60 s, then 120 s, ... (`rate_limited`, with Kino's `userMessage`); members already in
    *   keep going. After 30 wrong codes in all the room closes itself: Kino tells the person and your next calls get
    *   `room_closed`.

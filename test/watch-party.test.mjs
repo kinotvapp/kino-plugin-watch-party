@@ -19,7 +19,19 @@ import { validate } from "../sdk/validate.mjs";
 import { contract, validateManifest } from "../sdk/contract.mjs";
 import { fakeContext, foreignContext } from "../sdk/panel.mjs";
 import { checkPanelScreen, checkPanelScreenAnswer, childNodes, fakePanelScreenContext } from "../sdk/screen.mjs";
-import { createNet, deviceKino } from "./net.mjs";
+import { createNet, createShortService, deviceKino } from "./net.mjs";
+
+/** The kit's `fetchImpl` over the fake short-code service (the kit shim calls it like the WHATWG fetch): never the network. */
+function kitFetch(svc = createShortService()) {
+  const f = async (url, init = {}) => {
+    let body;
+    try { body = typeof init.body === "string" && init.body ? { json: JSON.parse(init.body) } : undefined; } catch { body = undefined; }
+    const r = await svc.fetch(String(url), { method: init.method || "GET", body });
+    return new Response(r.text(), { status: r.status, headers: { "content-type": "application/json" } });
+  };
+  f.svc = svc;
+  return f;
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIR = pjoin(HERE, "..");
@@ -34,7 +46,7 @@ const SPAN = 1000000;
 
 let pure = null;
 async function P() {
-  if (!pure) pure = (await loadPlugin(PLUGIN, createKino(MANIFEST, { env: {} }).kino, { console: quiet })).plugin;
+  if (!pure) pure = (await loadPlugin(PLUGIN, createKino(MANIFEST, { env: {}, fetchImpl: kitFetch() }).kino, { console: quiet })).plugin;
   return pure;
 }
 
@@ -43,13 +55,19 @@ async function P() {
 const all = (n) => [n, ...childNodes(n).flatMap(all)];
 const texts = (root) => all(root).flatMap((n) => [n.text, n.label, n.title].filter((x) => typeof x === "string"));
 const ofType = (root, type) => all(root).filter((n) => n.type === type);
+/** A raw chat ListView's bubbles in order: { mine, text } (a card's text, or a reaction's glyph). */
+const bubblesOf = (list) => list.items.flatMap((g) => g.type !== "Column" ? [] : g.children
+  .filter((n) => n.type === "Card" || (n.type === "Text" && n.style === "h4"))
+  .map((n) => ({ mine: g.crossAxisAlignment === "end", text: n.type === "Card" ? n.children[0].text : n.text })));
+const rawChat = (raw) => all(raw.root).find((n) => n.key === "chat");
+const focusFirstField = (raw) => all(raw.root).find((n) => n.type === "TextField" && !n.hidden)?.key;
 
 /** The context Kino gives a tab contributed to another plugin's title (Dune on «Latino» by default). */
 function ctxOf(dev, now, over = {}) {
   const base = fakeContext("movie:438631", { title: "Dune", year: "2021", ids: { tmdb: 438631, imdb: "tt1160419" }, device: dev.kind, positionMs: posAt(dev, now), paused: dev.paused, ...(dev.ctxOver || {}), ...over });
   base.player = { ...base.player, speed: dev.speed || 1 };
   const f = foreignContext(base, "watch-party", dev.source || LATINO);
-  return fakePanelScreenContext(f, { state: { inputs: {}, ui: {}, ...(dev.tab ? { tab: dev.tab } : {}) } });
+  return fakePanelScreenContext(f, { state: { inputs: {}, ui: {}, ...(dev.tab ? { tab: dev.tab } : {}), ...(dev.state || {}) } });
 }
 
 /** Where a device's player is at [now]: it moves on while playing, at its speed. */
@@ -79,6 +97,7 @@ async function panel(dev, now, over = {}) {
  * Task 8x adds `go.copy` (the 11th go shape). Until the kit knows it, it drops each copy button's go with exactly this line;
  * these are filtered (one per copy go in the tree, nothing else). Once 8x lands the kit drops nothing and this filters nothing.
  */
+const groupShortOf = (x) => `${x.slice(0, 2)} ${x.slice(2)}`;
 const COPY_DROP = "screen: button onTap go must be exactly one of title, play, search, browse, section, categories, close, screen, titleByIds, url, dropped";
 const copyGos = (raw) => (JSON.stringify(raw).match(/"go":\{"copy":/g) || []).length;
 function withoutCopyDrops(dropped, raw) {
@@ -168,8 +187,9 @@ test("the manifest: a contributed tab with room, qrScan and playerControl; Kino 
     assert.ok(r.consent.some((l) => l.text === line && l.danger === true), line);
   }
   assert.ok(r.consent.some((l) => /pausar, reanudar y mover/.test(l.text) && l.danger === true));
-  // The plugin never fetches: the declared host is only its documentation.
-  assert.ok(!/kino\.fetch\(/.test(readFileSync(PLUGIN, "utf8")));
+  // The only host it reaches is the short-code service.
+  assert.deepEqual(MANIFEST.hosts, ["url-code.kinotv.workers.dev"]);
+  assert.equal(MANIFEST.fetchHosts, undefined);
 });
 
 // ---------- pure pieces ----------
@@ -317,17 +337,17 @@ test("the same source and the same title: else Kino's title page or the room's p
 
 test("kit room: the host's tab, Bea's hello and message relayed with a cseq, junk ignored, the code never in the chat", async () => {
   const kitRoom = createKitRoom({ now: () => T0 });
-  const { kino } = createKino(MANIFEST, { room: kitRoom, callFunction: "panelAction", env: {}, now: () => T0 });
+  const { kino } = createKino(MANIFEST, { room: kitRoom, callFunction: "panelAction", env: {}, now: () => T0, fetchImpl: kitFetch() });
   const plugin = (await loadPlugin(PLUGIN, kino, { console: quiet })).plugin;
   const dev = { id: "kit", kind: "phone", pos: 600000, posAt: T0, paused: false, plugin, kino };
   const a = await press(dev, "create", T0, { values: { myName: "Ana" } });
-  assert.equal(a.state.tab, "room");
+  assert.deepEqual([a.state.tab, a.focus], ["chat", "chatText"], "the room opens on the chat, the D-pad on its input");
   const code = party(dev).code;
-  assert.match(code, /^[0-9]{4}$/, "the kit honours codeDigits: 4 (Task 8w)");
+  assert.match(code, /^[0-9]{12}$/, "Kino's default 12-digit room code: nobody types it");
   dev.tab = "room";
   const { panel: shown } = await panel(dev, T0 + 100);
   assert.ok(texts(shown.root).some((x) => x.includes(code.replace(/(\d{4})(?=\d)/g, "$1 "))), "the code shown grouped");
-  assert.equal(ofType(shown.root, "qr")[0].value, `KINOPARTY1|${party(dev).hostWords}|${code}`);
+  assert.equal(ofType(shown.root, "qr")[0].value, `https://${party(dev).hostWords}.trycloudflare.com/?c=${code}`);
   kitRoom.say("mbea0001", { t: "hello", name: "Bea", role: "seat", maxCseq: 0 });
   kitRoom.say("mbea0001", { t: "msg", text: `hola, el código es ${code}` });
   kitRoom.say("mbea0001", { t: "msg", text: "hola", extra: true });
@@ -347,7 +367,7 @@ test("kit room: the host's tab, Bea's hello and message relayed with a cseq, jun
 
 test("kit room: a guest joins the waiting room, follows the host's state and asks with Sincronizar", async () => {
   const kitRoom = createKitRoom({ now: () => T0 });
-  const { kino } = createKino(MANIFEST, { room: kitRoom, callFunction: "panelAction", env: {}, now: () => T0 });
+  const { kino } = createKino(MANIFEST, { room: kitRoom, callFunction: "panelAction", env: {}, now: () => T0, fetchImpl: kitFetch() });
   const plugin = (await loadPlugin(PLUGIN, kino, { console: quiet })).plugin;
   const dev = { id: "kitg", kind: "phone", pos: 500000, posAt: T0, paused: false, plugin, kino };
   const a = await join(dev, kitRoom.remote.words, kitRoom.remote.code, "Beto", T0);
@@ -376,18 +396,16 @@ test("two members: chat both ways with the host's numbers, reactions, the 8-emoj
   await press(bea, "emoji", t + 50, { arg: "7" });
   t = await rounds([host, bea], t + 100, 2);
   for (const d of [host, bea]) assert.deepEqual(hist(d).map((e) => [e.c, e.n, e.x]), [[SPAN + 1, "Bea", "¿Empezamos Dune?"], [SPAN + 2, "Ana", "¡Sí! 🍿"], [SPAN + 3, "Bea", "🍿"]]);
-  // The picker only inserts into the text field; a reaction outside the palette does not exist.
-  const pick = await press(bea, "pick", t, { arg: "22", values: { chatText: "hola" } });
-  assert.deepEqual(pick.ui, [{ set: { key: "chatText", value: "hola🎉" } }]);
-  assert.equal(await press(bea, "emoji", t, { arg: "99" }), null);
+  assert.equal(await press(bea, "emoji", t, { arg: "99" }), null, "a reaction outside the palette does not exist");
   // Five messages in ten seconds, then «Espera un momento».
   for (let i = 0; i < 5; i++) assert.deepEqual((await say(bea, "m" + i, t + 6000 + i)).ui, [{ clear: "chatText" }]);
   assert.equal((await say(bea, "m5", t + 6010)).toast.role, "warning");
-  // The tab: newest first, a ListView of plain Text (no link, no image), and the guest's own pending line.
-  const { panel: shown } = await panel(bea, t + 6100);
-  const list = ofType(shown.root, "list")[0];
-  assert.ok(list.items.every((n) => n.type === "text"));
-  assert.ok(texts(shown.root).some((x) => x.includes("(enviando…)")));
+  // The tab: bubbles of plain text (no link, no image), and the guest's own pending messages, marked «Enviando…».
+  const { raw, panel: shown } = await panel(bea, t + 6100);
+  const list = rawChat(raw);
+  assert.ok(all({ children: list.items }).every((n) => [undefined, "Column", "Card", "Text"].includes(n.type)));
+  assert.equal(list.items.at(-1).key, "pending");
+  assert.ok(texts(shown.root).includes("Enviando…"));
 });
 
 test("two members: the guest follows pause, seek and speed within 2 s, and its own corrections never loop back", async () => {
@@ -469,7 +487,7 @@ test("untrusted peers: junk from a member changes nothing, a guest's forged stat
   }
   t = await rounds([host, bea, caro], t, 2);
   assert.equal(hist(host).length, before);
-  assert.deepEqual(party(host).roster.map((m) => m.name), ["Ana", "Bea", "Caro"], "a second hello from a session adds no one, and no forged epoch moves the host");
+  assert.deepEqual(party(host).roster.map((m) => m.id), ["host", party(bea).me.mid, party(caro).me.mid], "a second hello from a session adds no one (it may only rename that member), and no forged epoch moves the host");
   assert.equal(party(host).banner, null);
   const r = await panel(bea, t);
   assert.equal(r.raw.player, undefined, "Caro's forged pause reached Bea but only the host's messages count");
@@ -621,7 +639,7 @@ test("lateJoinerGetsLast50: a newcomer gets the last 50 entries, not the whole c
   assert.equal(h.at(-1).x, "línea 120");
 });
 
-test("longChatKeepsRecentWindowAcrossFailover: 250 lines, the host goes, the last 200 survive and the tab shows 100", async () => {
+test("longChatKeepsRecentWindowAcrossFailover: 250 lines, the host goes, the last 200 survive and the tab draws the newest 40", async () => {
   let { host, guests: [bea, caro], t } = await room(["Bea", "Caro"]);
   for (let i = 1; i <= 250; i++) {
     await say(host, "línea " + i, t);
@@ -640,8 +658,12 @@ test("longChatKeepsRecentWindowAcrossFailover: 250 lines, the host goes, the las
     assert.equal(h[0].x, "línea 52");
     assert.equal(h.at(-1).x, "después del cambio");
   }
-  const { panel: shown } = await panel(caro, t);
-  assert.equal(ofType(shown.root, "list")[0].items.length, 100);
+  const { raw } = await panel(caro, t);
+  const drawn = bubblesOf(rawChat(raw));
+  assert.equal(drawn.length, 40, "the tab draws the newest 40 (the list scrolls)");
+  assert.deepEqual(drawn.at(-1), { mine: true, text: "después del cambio" });
+  caro.kind = "tv";
+  assert.equal(bubblesOf(rawChat((await panel(caro, t)).raw)).length, 25, "and 25 on a TV");
 });
 
 // ---------- one person, a phone and a TV ----------
@@ -748,7 +770,7 @@ test("wrongCodeLinkRefused: a tampered or foreign QR is refused; a malformed lin
   phone.scans.push(`KINOLINK1|${words}|${wrong}|${exp}`);
   const a = await press(phone, "addDevice", t);
   assert.deepEqual(a.state.error, { es: "Ese código no es el de la sala", en: "That is not the room's code", retry: "addDevice" }, "the error in place, with a retry");
-  assert.deepEqual(a.ui, [{ hide: "busyTv" }, { enable: "btnAddDevice" }]);
+  assert.deepEqual(a.ui, [{ hide: "busy.addDevice" }, { hide: "busy.retry" }, { enable: "btnAddDevice" }]);
   phone.scans.push(`KINOPARTY1|${words}|${code}`);
   assert.equal((await press(phone, "addDevice", t + 10)).toast.role, "error");
   // Someone with the link code but a bad message: ignored, the endpoint stays open for the real phone.
@@ -776,7 +798,7 @@ test("A1 rosterFloodIgnored: one session, many hellos: one member, and the snaps
     await mal.kino.room.send({ t: "hello", name: "Fake" + i, role: "seat" }, { session: h });
   }
   t = await rounds([host, bea, mal], t + 100, 6);
-  assert.deepEqual(party(host).roster.map((m) => m.name), ["Ana", "Bea", "Mal"]);
+  assert.equal(party(host).roster.length, 3, "one member per session (its hellos may only rename it)");
   assert.ok(party(bea).snapSeq > seq, "Bea still accepts the host's snapshots");
   // And the room's maximum holds even for different sessions: a ninth hello is ignored.
   const p = await P();
@@ -989,12 +1011,12 @@ test("the legacy fallback, the 200-node limit with eight people, and a room swit
   assert.equal(legacy.format, undefined);
   assert.equal(legacy.elements[0].type, "text");
   // The person switched rooms off for this plugin: Kino's refusal is shown, nothing breaks.
-  const { kino } = createKino(MANIFEST, { room: createKitRoom(), callFunction: "panelAction", env: { KINO_ROOM_REVOKED: "1" } });
+  const { kino } = createKino(MANIFEST, { room: createKitRoom(), callFunction: "panelAction", env: { KINO_ROOM_REVOKED: "1" }, fetchImpl: kitFetch() });
   const plugin = (await loadPlugin(PLUGIN, kino, { console: quiet })).plugin;
   const dev = { id: "off", kind: "phone", pos: 0, posAt: T0, paused: false, plugin, kino };
   const a = await press(dev, "create", T0, { values: { myName: "Ana" } });
   assert.equal(a.state.error.retry, "create");
-  assert.deepEqual(a.ui, [{ hide: "busyCreate" }, { enable: "btnCreate" }]);
+  assert.deepEqual(a.ui, [{ hide: "busy.create" }, { hide: "busy.retry" }, { enable: "btnCreate" }]);
 });
 
 // ---------- review round 2: the re-review's scenarios (S1 to S9) as tests ----------
@@ -1149,7 +1171,7 @@ test("S7 closedRoomNoDoor: Kino closed the host's room and no door answers: «tu
   assert.equal(a.toast.text, "No hay otra puerta: tu sala terminó");
   t = await rounds([host], t + 100, 2);
   const { panel: shown } = await panel(host, t);
-  assert.ok(texts(shown.root).some((x) => x.includes("Tu sala terminó en este aparato")));
+  assert.ok(texts(shown.root).some((x) => x.includes("Tu sala terminó")));
 });
 
 test("S8 staleHostFailedNoSplit: a successor that failed offline, then was dropped, is never promoted by a hello", async () => {
@@ -1199,37 +1221,43 @@ test("the «alone» notice only after a real departure: members dropped for a cl
 
 // ---------- owner changes 2026-10-27: a 4-digit party code, and loading feedback on every press that waits ----------
 
-test("the party code is 4 digits (codeDigits: 4); the TV's one-use link keeps 12; a code typed with a space joins", async () => {
-  // What the plugin asks Kino for.
+test("the party room uses Kino's default 12-digit code (no codeDigits) and a 5-digit short code from the service", async () => {
   const asked = [];
-  const p = await P();
-  const spyKino = createKino(MANIFEST, { env: {} }).kino;
+  const svc = createShortService();
+  const spyKino = createKino(MANIFEST, { env: {}, fetchImpl: kitFetch(svc) }).kino;
   const { plugin } = await loadPlugin(PLUGIN, {
     ...spyKino,
+    fetch: (url, o) => svc.fetch(url, o),
     storage: { get: () => null, set() {}, remove() {}, keys: () => [] },
     room: {
-      async open(o) { asked.push(plain(o)); return { code: "1234", words: "brave-river-cat-moon", expiresAtMs: T0 + 3600000 }; },
+      async open(o) { asked.push(plain(o)); return { code: "123456789012", words: "brave-river-cat-moon", expiresAtMs: T0 + 3600000 }; },
       async send() {}, async inbox() { return { events: [], last: 0, more: false, reachable: true }; }, async close() {}, async members() { return []; }, async state() { return { role: "host", joined: [], hosted: null }; }, async join() { throw new Error("no"); },
     },
   }, { console: quiet });
   const ctx = ctxOf({ kind: "phone", pos: 0, posAt: T0, paused: false }, T0);
-  await plugin.panelActionAt({ trigger: "press", name: "create", values: { myName: "Ana" } }, ctx, T0);
-  assert.equal(asked[0].codeDigits, 4);
-  assert.ok(p.LIMITS.partyCodeDigits === 4);
-  // On the fake network (which already models the option): a 4-digit code, shown as is, in the QR, and joined as «12 34».
-  let { host, guests: [bea], code, words, t } = await room(["Bea"]);
-  assert.match(code, /^[0-9]{4}$/);
+  const a = plain(await plugin.panelActionAt({ trigger: "press", name: "create", values: { myName: "Ana" } }, ctx, T0));
+  assert.equal(asked[0].codeDigits, undefined, "the platform's default code");
+  assert.equal(a.toast.text, "Sala creada: comparte el código 41 408");
+  assert.deepEqual(svc.calls.map((c) => [c.method, c.url, c.timeoutMs, c.redirect]), [["POST", "https://url-code.kinotv.workers.dev/", 5000, "manual"]]);
+  assert.deepEqual(plain(svc.calls[0].body), { json: { url: "https://brave-river-cat-moon.trycloudflare.com/?c=123456789012" } });
+  // On the fake network: the host shows the short code; a guest types it and joins; the TV link keeps its 12 digits.
+  let { host, code, words, net, t } = await room(["Bea"]);
+  assert.match(code, /^[0-9]{12}$/);
+  const short = party(host).short;
+  assert.match(short, /^[0-9]{5}$/);
   host.tab = "room";
   const { panel: shown } = await panel(host, t);
-  assert.ok(texts(shown.root).includes(`Código: ${code}`));
-  assert.equal(ofType(shown.root, "qr")[0].value, `KINOPARTY1|${words}|${code}`);
-  assert.ok(party(host).roster.some((m) => m.name === "Bea"));
-  const tv = await device(host.net, "tv", { kind: "tv" });
+  assert.ok(texts(shown.root).includes(`${short.slice(0, 2)} ${short.slice(2)}`));
+  assert.equal(ofType(shown.root, "qr")[0].value, `https://${words}.trycloudflare.com/?c=${code}`);
+  const eva = await device(net, "eva");
+  const j = await press(eva, "joinShort", t + 100, { value: { joinShortCode: ` ${short.slice(0, 2)}-${short.slice(2)} ` }, values: { myName: "Eva" } });
+  assert.equal(j.toast.role, "success");
+  assert.deepEqual(j.ui.slice(0, 3), [{ hide: "busy.joinShort" }, { hide: "busy.retry" }, { enable: "btnJoinShort" }]);
+  t = await rounds([host, eva], t + 200, 2);
+  assert.ok(party(host).roster.some((m) => m.name === "Eva"));
+  const tv = await device(net, "tv", { kind: "tv" });
   await press(tv, "linkStart", t, { values: { myName: "Bea" } });
-  assert.match(party(tv).link.code, /^[0-9]{12}$/, "the link endpoint keeps the default 12 digits");
-  const eva = await device(host.net, "eva");
-  const a = await press(eva, "join", t + 100, { value: { joinWords: words, joinCode: code.slice(0, 2) + " " + code.slice(2) }, values: { myName: "Eva" } });
-  assert.equal(a.toast.role, "success");
+  assert.match(party(tv).link.code, /^[0-9]{12}$/);
 });
 
 test("30 wrong codes close the room (Kino's rule for short codes): the host's tab says its room closed", async () => {
@@ -1242,106 +1270,35 @@ test("30 wrong codes close the room (Kino's rule for short codes): the host's ta
   assert.equal(party(host).banner.kind, "closedMine");
 });
 
-test("loading: every state has the hidden progress rows, one label each; each press that waits shows one at once and disables its button", async () => {
-  const p = await P();
-  const rowsOf = (root) => all(root).filter((n) => Object.keys(p.BUSY_ROWS).includes(n.key));
-  const check = (root, label) => {
-    const rows = rowsOf(root);
-    assert.deepEqual(rows.map((r) => r.key).sort(), Object.keys(p.BUSY_ROWS).sort(), label);
-    for (const r of rows) {
-      assert.equal(r.hidden, true, `${label}: ${r.key} hidden until a tap shows it`);
-      const kids = childNodes(r);
-      assert.equal(kids.length, 1, "one node: Kino's progress draws its own label (no duplicate text)");
-      assert.equal(kids[0].type, "progress");
-      assert.equal(kids[0].label, p.BUSY_ROWS[r.key][0], "the label a screen reader announces");
-    }
-  };
-  const tapOf = (n) => n.onTap || (n.action && n.action.onTap) || n.onSubmit;
-  const busyTapOk = (n, event) => {
-    const a = tapOf(n);
-    assert.equal(a.event.name, event);
-    assert.deepEqual(a.ui[0], { show: p.BUSY[event].row });
-    if (p.BUSY[event].button) assert.deepEqual(a.ui[1], { disable: p.BUSY[event].button });
-  };
-  // Idle, on a phone and on a TV.
-  const idle = p.newParty("Ana");
-  for (const device of ["phone", "tv"]) {
-    const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device }), "watch-party", LATINO));
-    const r = checkPanelScreen(plain(p.view(idle, ctx, T0)), "es");
-    assert.deepEqual(r.dropped, []);
-    check(r.panel.root, "idle " + device);
-    busyTapOk(all(r.panel.root).find((n) => n.key === "btnCreate"), "create");
-    busyTapOk(all(r.panel.root).find((n) => n.key === "joinForm"), "join");
-    busyTapOk(all(r.panel.root).find((n) => n.key === "btnScan"), "scanJoin");
-    busyTapOk(all(r.panel.root).find((n) => n.key === "btnLink"), "linkStart");
-  }
-  // In a room (both tabs), with a banner whose button waits.
-  let { host, guests: [bea], net, t } = await room(["Bea"]);
-  net.down.add(party(host).hostWords);
-  t = await rounds([bea], t, 5);
-  for (const tab of [undefined, "room"]) {
-    bea.tab = tab;
-    const { panel: shown } = await panel(bea, t);
-    check(shown.root, "party " + (tab || "chat"));
-    if (!tab) busyTapOk(ofType(shown.root, "banner").find((b) => b.action && b.action.label === "Reintentar"), "retryHost");
-    else busyTapOk(all(shown.root).find((n) => n.key === "btnAddDevice"), "addDevice");
-  }
-  // In the pinned panel (a compact, tall drawer) the same rows are there.
-  const pinned = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device: "tv" }), "watch-party", LATINO), { size: { widthClass: "compact", heightClass: "expanded", orientation: "portrait" } });
-  check(checkPanelScreen(plain(p.view(party(bea), pinned, t)), "es").panel.root, "pinned");
-});
-
-test("loading: the answer hides the row and enables the button, on success and on failure; a failure shows in place with a retry", async () => {
-  const net = createNet();
-  const ana = await device(net, "ana");
-  const ok = await press(ana, "create", T0, { values: { myName: "Ana" } });
-  assert.deepEqual(ok.ui.slice(0, 2), [{ hide: "busyCreate" }, { enable: "btnCreate" }]);
-  assert.equal(ok.state.error, null, "a success clears an earlier error");
-  const bea = await device(net, "bea");
-  const bad = await press(bea, "join", T0 + 100, { value: { joinWords: "nadie-esta-aqui", joinCode: "1234" }, values: { myName: "Bea" } });
-  assert.deepEqual(bad.ui, [{ hide: "busyJoin" }, { enable: "btnJoin" }]);
-  assert.deepEqual(bad.state.error, { es: "No se pudo llegar a la sala. Revisa la conexión.", en: "The room could not be reached. Check the connection.", retry: "join" });
-  // Drawn in place with «Reintentar», which waits again (row and button).
-  const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1"), "watch-party", LATINO), { state: { inputs: {}, ui: {}, error: bad.state.error } });
-  const r = checkPanelScreen(plain(await (async () => { bea.fn = "panel"; return bea.plugin.panelAt(ctx, T0 + 200); })()), "es");
-  const banner = ofType(r.panel.root, "banner").find((b) => b.text.startsWith("No se pudo llegar"));
-  assert.equal(banner.role, "error");
-  assert.deepEqual(banner.action.onTap.ui, [{ show: "busyJoin" }, { disable: "btnJoin" }]);
-  assert.equal(banner.action.onTap.event.name, "join");
-  // A press that does not wait carries no such operations.
-  const pick = await press(bea, "pick", T0 + 300, { arg: "0", values: { chatText: "" } });
-  assert.deepEqual(pick.ui, [{ set: { key: "chatText", value: "😀" } }]);
-});
-
 // ---------- owner request: «Copiar invitación» and a join form that reads a pasted invitation ----------
 
 const W = "integrating-salad-alto-kurt";
 const fw = (digits) => digits.split("").map((d) => String.fromCodePoint(0xff10 + Number(d))).join("");
 
-test("invitationText: the fields, title with year and plugin, under 500 characters, and nothing else", async () => {
+test("invitationText: the short code only (<= 6 lines, < 500), or words + code without one; nothing else", async () => {
   const p = await P();
   const media = { source: LATINO, tmdb: 438631, imdb: "tt1160419", kind: "movie", season: null, episode: null, title: "Dune", year: 2021 };
-  const text = p.invitationText({ words: W, code: "1234", media });
+  const text = p.invitationText({ short: "41408", words: W, code: "123456789012", media });
   assert.equal(text, [
     "Únete a mi fiesta en Kino 🎬",
     "Película: Dune (2021), con «Latino»",
-    `Palabras: ${W}`,
-    "Código: 1234",
-    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Unirme.",
-    "(Join my Kino watch party: words + code above.)",
+    "Código: 41408",
+    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.",
+    "(Join my Kino watch party: type the code above in Kino.)",
   ].join("\n"));
-  const series = p.invitationText({ words: W, code: "1234", media: { ...media, kind: "series", title: "Breaking Bad", year: 2008, season: 2, episode: 3 } });
+  assert.ok(!text.includes(W) && !text.includes("123456789012"), "the words and the room code stay out of it");
+  const series = p.invitationText({ short: "41408", words: W, code: "1234", media: { ...media, kind: "series", title: "Breaking Bad", year: 2008, season: 2, episode: 3 } });
   assert.ok(series.includes("Serie: Breaking Bad (2008), T2 E3, con «Latino»"));
-  assert.ok(!p.invitationText({ words: W, code: "1234" }).includes("Película"), "no title line without a title");
-  const long = p.invitationText({ words: W, code: "1234", media: { ...media, title: "Una película con un título larguísimo ".repeat(10) } });
-  assert.ok(Array.from(long).length < 500 && long.includes("Código: 1234"));
-  // Only words and code: no link, no member id, no other number than the code and the year.
-  for (const t of [text, series, long]) {
+  const long = p.invitationText({ short: "41408", media: { ...media, title: "Una película con un título larguísimo ".repeat(10) } });
+  const fallback = p.invitationText({ words: W, code: "123456789012", media });
+  assert.ok(fallback.includes(`Palabras: ${W}`) && fallback.includes("Código: 123456789012"), "without a short code: words + code");
+  for (const t of [text, series, long, fallback]) {
+    assert.ok(Array.from(t).length < 500);
     assert.ok(t.split("\n").length <= 6, "at most 6 lines (go.copy's limit)");
     assert.ok(!/https?:|trycloudflare|\bm[0-9a-z]{7}\b|host/.test(t), t);
-    assert.deepEqual(p.parseInvitation(t).code, "1234");
-    assert.deepEqual(p.parseInvitation(t).words, W);
   }
+  assert.deepEqual(plain(p.parseInvitation(text)), { short: "41408" }, "a pasted short invitation reads back as the short code");
+  assert.deepEqual(plain(p.parseInvitation(fallback)), { words: W, code: "123456789012" });
 });
 
 test("parseInvitation: a table of realistic pastes", async () => {
@@ -1384,26 +1341,49 @@ test("parseInvitation: a table of realistic pastes", async () => {
   }
 });
 
-test("copy buttons: on the host's phone (room tab and the open room), never on a TV; the go is Kino's copy shape", async () => {
+test("the Sala tab opens with one line «Sala: 41 408» (copy icon at its end on the host's phone); the chat never has copy buttons", async () => {
   let { host, t } = await room([]);
-  const copyNodes = (root) => all(root).filter((n) => ["btnCopyInvite", "btnCopyCode"].includes(n.key));
-  const { raw, panel: chatShown } = await panel(host, t);
-  assert.equal(copyNodes(chatShown.root).length, 2, "«Sala abierta»: the host alone gets them in the chat tab");
-  const go = JSON.parse(JSON.stringify(raw)).root.children.flatMap(function walk(n) { return [n, ...((n.children || []).flatMap(walk))]; }).find((n) => n.key === "btnCopyInvite").onPressed.go;
-  assert.deepEqual(Object.keys(go), ["copy"]);
-  assert.equal(go.copy.sensitive, true);
-  assert.equal(go.copy.text, (await P()).invitationText({ words: party(host).hostWords, code: party(host).code, media: party(host).media }));
+  const copyNodes = (root) => all(root).filter((n) => /^btnCopy/.test(n.key || ""));
+  // The chat tab, even with the room still empty: no invitation, no copy; the empty state and the input.
+  for (const kind of ["phone", "tv"]) {
+    host.kind = kind;
+    const { raw } = await panel(host, t);
+    assert.equal(copyNodes(raw.root).length, 0, `${kind}: no copy in the chat`);
+    assert.ok(!/Sala abierta|Room open/.test(JSON.stringify(raw)));
+    assert.equal(raw.root.children.find((n) => n.key === "chat").items.length, 0);
+    assert.ok(raw.root.children.some((n) => n.key === "inputRow"));
+  }
   host.tab = "room";
-  const { panel: roomShown } = await panel(host, t + 100);
-  assert.equal(copyNodes(roomShown.root).length, 2);
-  host.kind = "tv";
-  const { panel: tvShown } = await panel(host, t + 200);
-  assert.equal(copyNodes(tvShown.root).length, 0, "a TV gets no copy button (Kino drops the copy there)");
-  // A guest sees no copy button.
+  for (const kind of ["phone", "tv"]) {
+    host.kind = kind;
+    const { raw } = await panel(host, t + 100);
+    const kids = raw.root.children;
+    const head = kids.indexOf(kids.find((n) => n.key === "headerRow"));
+    const line = kids[head + 1];
+    assert.equal(line.key, "roomLine", "the room line right under the header, no title above it");
+    assert.deepEqual(line.children.slice(0, 2).map((n) => [n.text, n.style || "", !!n.bold]), [["Sala:", "", false], [groupShortOf(party(host).short), "h5", true]]);
+    assert.equal(line.children[0].color, "muted");
+    assert.ok(!/"text":"(Invitar|Código: )/.test(JSON.stringify(raw)), "no «Invitar» heading, no separate code block");
+    const copies = copyNodes(raw.root);
+    if (kind === "tv") { assert.equal(copies.length, 0, "a TV gets no copy (Kino drops the copy there)"); continue; }
+    assert.equal(copies.length, 1, "only «Copiar invitación»");
+    const b = copies[0];
+    assert.equal(line.children.at(-1), b, "at the right end of the same line");
+    assert.deepEqual([b.type, b.icon, b.labelText, b.labelTextEn], ["IconButton", "copy", "Copiar invitación", "Copy invitation"]);
+    const go = b.onPressed.go;
+    assert.deepEqual(Object.keys(go), ["copy"]);
+    assert.equal(go.copy.sensitive, true);
+    assert.equal(go.copy.text, (await P()).invitationText({ short: party(host).short, words: party(host).hostWords, code: party(host).code, media: party(host).media }));
+    // Opciones avanzadas stays collapsed, below the members.
+    const keys = kids.map((n) => n.key);
+    assert.equal(kids[keys.indexOf("advanced")].hidden, true);
+    assert.ok(keys.indexOf("advanced") > keys.indexOf("roomLine"));
+  }
+  // A guest sees the line (when it knows the short code) but no copy button.
   const r2 = await room(["Bea"]);
   r2.guests[0].tab = "room";
-  const { panel: guestShown } = await panel(r2.guests[0], r2.t);
-  assert.equal(copyNodes(guestShown.root).length, 0);
+  const { raw: guestRaw } = await panel(r2.guests[0], r2.t);
+  assert.equal(copyNodes(guestRaw.root).length, 0);
 });
 
 test("the kit and go.copy: until Task 8x lands it drops exactly the copy go of each button (and nothing else)", async () => {
@@ -1412,27 +1392,680 @@ test("the kit and go.copy: until Task 8x lands it drops exactly the copy go of e
   if (!knows) assert.deepEqual(r.dropped, [COPY_DROP], "re-run this file once 8x lands: the drop disappears");
 });
 
-test("the join form reads a pasted invitation, shows it back, and joins only on «Entrar»", async () => {
-  let { net, words, code, t } = await room(["Bea"]);
+// ---------- owner feedback from a real TV: no clipboard and no camera there ----------
+
+// ---------- the owner's short-code service (url-code.kinotv.workers.dev), used as it is today ----------
+
+const SVC = "https://url-code.kinotv.workers.dev/";
+
+test("parseRoomUrl: only https://<words>.trycloudflare.com/?c=<4..12 digits>, strictly (a table of valid and hostile addresses)", async () => {
+  const p = await P();
+  const ok = (words, code) => ({ words, code });
+  const cases = [
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", ok("integrating-salad-alto-kurt", "123456789012")],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com?c=123456789012", ok("integrating-salad-alto-kurt", "123456789012")],
+    ["https://ab-cd.trycloudflare.com/?c=1234", ok("ab-cd", "1234")],
+    ["https://a-b-c-d-e-f.trycloudflare.com/?c=1234", ok("a-b-c-d-e-f", "1234")],
+    ["http://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", null],
+    ["HTTPS://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", null],
+    ["https://Integrating-Salad-Alto-Kurt.trycloudflare.com/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com.evil.com/?c=123456789012", null],
+    ["https://evil.com/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.evil.trycloudflare.com/?c=123456789012", null],
+    ["https://user@integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", null],
+    ["https://user:pw@integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com:443/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com:8443/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com./?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/x?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com//?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012&x=1", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?x=1&c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012#frag", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=123", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=1234567890123", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=12ab", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/", null],
+    ["https://xn--mnchen-3ya.trycloudflare.com/?c=123456789012", null],
+    ["https://word.trycloudflare.com/?c=123456789012", null],
+    ["https://a-b-c-d-e-f-g.trycloudflare.com/?c=123456789012", null],
+    ["https://abc1-def.trycloudflare.com/?c=123456789012", null],
+    ["https://-abc-def.trycloudflare.com/?c=123456789012", null],
+    ["https://abc--def.trycloudflare.com/?c=123456789012", null],
+    ["https://" + "a".repeat(30) + "-" + "b".repeat(30) + "-cc.trycloudflare.com/?c=1234", null],
+    [" https://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012", null],
+    ["https://integrating-salad-alto-kurt.trycloudflare.com/?c=123456789012\n", null],
+    ["javascript:alert(1)", null],
+    ["", null],
+    [null, null],
+    [42, null],
+  ];
+  assert.ok(cases.length >= 30);
+  for (const [url, want] of cases) assert.deepEqual(plain(p.parseRoomUrl(url)), want, JSON.stringify(url));
+});
+
+test("normShort: 5 digits, spaces, hyphens and dots ignored, full-width digits read; anything else null", async () => {
+  const p = await P();
+  for (const [raw, want] of [["41408", "41408"], ["41 408", "41408"], ["41-408", "41408"], ["4.14.08", "41408"], [fw("41408"), "41408"], [41408, "41408"], ["4140", null], ["414080", null], ["4140a", null], ["", null], [null, null], [{}, null]]) {
+    assert.equal(p.normShort(raw), want, JSON.stringify(raw));
+  }
+  assert.equal(p.groupShort("41408"), "41 408");
+});
+
+test("the service calls: create (POST, 5 s, one retry), lookup (GET), every non-200 a failure, hostile answers refused", async () => {
+  const p = await P();
+  const svc = createShortService();
+  const f = (url, o) => svc.fetch(url, o);
+  // Create: one retry after a network failure.
+  let fails = 1;
+  svc.answer = null;
+  const flaky = async (url, o) => { if (fails-- > 0) { const e = new Error("network"); e.code = "network"; throw e; } return f(url, o); };
+  const made = plain(await p.createShortCode(flaky, W, "123456789012", T0));
+  assert.deepEqual([made.ok, made.short], [true, "41408"]);
+  assert.equal(made.until, T0 + 28800000);
+  svc.down = true;
+  assert.deepEqual(plain(await p.createShortCode(f, W, "123456789012", T0)), { ok: false, error: "network" });
+  assert.equal(svc.calls.filter((c) => c.method === "POST").length, 3, "1 + the retry, then 2 more for the failed create");
+  svc.down = false;
+  // The service must give back the very address it stored, with a 5-digit code.
+  svc.answer = () => [200, { code: "41408", url: "https://evil.example/", expires_in_seconds: 28800 }];
+  assert.equal((await p.createShortCode(f, W, "123456789012", T0)).ok, false);
+  svc.answer = () => [201, { code: "41408", url: p.roomUrlOf(W, "123456789012") }];
+  assert.equal((await p.createShortCode(f, W, "123456789012", T0)).ok, false, "only 200 counts");
+  svc.answer = () => [200, "not json"];
+  assert.equal((await p.createShortCode(f, W, "123456789012", T0)).ok, false);
+  svc.answer = () => [200, { code: "123", url: p.roomUrlOf(W, "123456789012") }];
+  assert.equal((await p.createShortCode(f, W, "123456789012", T0)).ok, false);
+  // Lookup.
+  svc.answer = null;
+  svc.codes.set("12345", p.roomUrlOf(W, "123456789012"));
+  assert.deepEqual(plain(await p.lookupShortCode(f, "12 345")), { ok: true, words: W, code: "123456789012" });
+  assert.deepEqual(plain(await p.lookupShortCode(f, "99999")), { ok: false, error: "notFound" });
+  for (const [status, body, error] of [
+    [200, "{broken", "invalid"], [200, { code: "12345" }, "invalid"], [200, { url: 42 }, "invalid"], [200, [], "invalid"],
+    [200, { url: "https://evil.example/?c=1234" }, "invalid"], [200, { url: `http://${W}.trycloudflare.com/?c=1234` }, "invalid"],
+    [302, { url: p.roomUrlOf(W, "1234") }, "invalid"], [500, {}, "network"], [503, {}, "network"], [429, {}, "invalid"],
+  ]) {
+    svc.answer = () => [status, body];
+    assert.deepEqual(plain(await p.lookupShortCode(f, "12345")), { ok: false, error }, JSON.stringify([status, body]));
+  }
+  svc.answer = null;
+  svc.down = true;
+  assert.deepEqual(plain(await p.lookupShortCode(f, "12345")), { ok: false, error: "network" });
+  // Never the returned address itself: every call went to the service.
+  assert.ok(svc.calls.every((c) => c.url.startsWith(SVC)), JSON.stringify(svc.calls.map((c) => c.url)));
+});
+
+test("joining with a short code: 404, network and invalid answers say so in place (with a retry); the returned address is never fetched", async () => {
+  let { net, host, t } = await room(["Bea"]);
   const eva = await device(net, "eva");
-  const pasted = `Mira esto 👉 *Palabras:* ${words}\n*Código:* ${code}`;
-  const read = await press(eva, "readInvite", t, { values: { joinPaste: pasted, myName: "Eva" } });
-  assert.deepEqual(read.ui, [{ set: { key: "joinWords", value: words } }, { set: { key: "joinCode", value: code } }]);
-  assert.deepEqual(read.state.invite, { words, code });
-  const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device: "phone" }), "watch-party", LATINO), { state: { inputs: {}, ui: {}, invite: read.state.invite } });
-  eva.fn = "panel";
-  const shown = checkPanelScreen(plain(await eva.plugin.panelAt(ctx, t + 10)), "es").panel;
-  assert.ok(texts(shown.root).some((x) => x.startsWith(`Vas a entrar a: ${words}`)));
-  assert.equal(eva.kino.storage.get("party"), null, "nothing joined yet");
-  const bad = await press(eva, "readInvite", t + 20, { values: { joinPaste: "hola, ¿vienes?" } });
-  assert.deepEqual(bad.state, { invite: null, inviteError: true });
-  // The whole invitation pasted into the words field: read, shown back, not joined; the next «Entrar» joins.
-  const first = await press(eva, "join", t + 30, { value: { joinWords: pasted, joinCode: "" }, values: { myName: "Eva" } });
-  assert.deepEqual(first.state.invite, { words, code });
-  assert.equal(eva.kino.storage.get("party"), null, "not in a room yet");
-  const second = await press(eva, "join", t + 40, { value: { joinWords: words, joinCode: code }, values: { myName: "Eva" } });
-  assert.equal(second.toast.role, "success");
-  // Ambiguous or empty: the in-place error says what is missing.
-  const none = await press(await device(net, "otro"), "join", t + 50, { value: { joinWords: "no sé", joinCode: "" }, values: {} });
-  assert.equal(none.state.error.es, "No encuentro las palabras o el código");
+  const tryCode = async (code) => (await press(eva, "joinShort", t, { value: { joinShortCode: code }, values: { myName: "Eva" } }));
+  let a = await tryCode("99999");
+  assert.deepEqual(a.state.error, { es: "Ese código no existe o ya venció", en: "That code does not exist or has expired", retry: "joinShort" });
+  a = await tryCode("123");
+  assert.equal(a.state.error.es, "Escribe los 5 números del código");
+  net.service.codes.set("55555", "https://evil.example/steal?c=1234");
+  a = await tryCode("55555");
+  assert.equal(a.state.error.es, "Ese código no es válido");
+  net.service.down = true;
+  a = await tryCode(party(host).short);
+  assert.equal(a.state.error.es, "No pude consultar el código; reintenta");
+  assert.equal(a.state.error.retry, "joinShort");
+  net.service.down = false;
+  a = await tryCode(party(host).short);
+  assert.equal(a.toast.role, "success");
+  assert.ok(net.service.calls.every((c) => c.url.startsWith(SVC)), "only the service, never the room's address");
+  assert.ok(!net.service.calls.some((c) => c.url.includes("evil.example")));
+});
+
+test("the service down when the room opens: the room works, the host gets the QR and the advanced options, and one press asks again", async () => {
+  const net = createNet();
+  net.service.down = true;
+  const ana = await device(net, "ana");
+  const a = await press(ana, "create", T0, { values: { myName: "Ana" } });
+  assert.equal(a.toast.role, "warning");
+  assert.equal(party(ana).phase, "party");
+  assert.equal(party(ana).short, null);
+  ana.tab = "room";
+  let { panel: shown } = await panel(ana, T0 + 100);
+  const keys = all(shown.root).map((n) => n.key);
+  for (const k of ["btnShort", "btnAdvanced", "advanced"]) assert.ok(keys.includes(k), k);
+  assert.ok(texts(shown.root).some((x) => x.startsWith("Código de la sala: ")), "the room's own code, in the collapsed advanced options");
+  assert.equal(all(shown.root).find((n) => n.key === "advanced").hidden, true);
+  net.service.down = false;
+  const again = await press(ana, "shortCode", T0 + 200);
+  assert.equal(again.toast.role, "success");
+  assert.match(party(ana).short, /^[0-9]{5}$/);
+  assert.deepEqual(again.ui.slice(0, 3), [{ hide: "busy.shortCode" }, { hide: "busy.retry" }, { enable: "btnShort" }]);
+});
+
+test("revoking: the host's leave DELETEs its code once (after closing the room); failures never block it; guests never revoke", async () => {
+  let { net, host, guests: [bea], t } = await room(["Bea"]);
+  const short = party(host).short;
+  net.service.calls.length = 0;
+  await press(bea, "leave", t);
+  assert.equal(net.service.calls.length, 0, "a guest never revokes the host's code");
+  await press(host, "leave", t + 100);
+  assert.deepEqual(net.service.calls.map((c) => [c.method, c.url, c.timeoutMs]), [["DELETE", SVC + short, 3000]]);
+  assert.equal(host.kino.storage.get("party"), null, "the code is forgotten with the room");
+  // A failing service: the leave still closes everything at once.
+  const r2 = await room([]);
+  r2.net.service.down = true;
+  const left = await press(r2.host, "leave", r2.t);
+  assert.equal(left.toastEn, "You left the room");
+  assert.equal(r2.host.kino.storage.get("party"), null);
+  // No code was ever created: no DELETE.
+  const net3 = createNet();
+  net3.service.down = true;
+  const ana = await device(net3, "ana");
+  await press(ana, "create", T0, { values: { myName: "Ana" } });
+  net3.service.down = false;
+  net3.service.calls.length = 0;
+  await press(ana, "leave", T0 + 100);
+  assert.equal(net3.service.calls.filter((c) => c.method === "DELETE").length, 0);
+});
+
+test("revoking: asking for a new code revokes the old one first; nothing secret is ever logged", async () => {
+  const net = createNet();
+  const logged = [];
+  const ana = await device(net, "ana");
+  ana.kino.log = { info: (x) => logged.push(String(x)), warn: (x) => logged.push(String(x)), error: (x) => logged.push(String(x)) };
+  await press(ana, "create", T0, { values: { myName: "Ana" } });
+  const first = party(ana).short;
+  net.service.calls.length = 0;
+  await press(ana, "shortCode", T0 + 100);
+  assert.deepEqual(net.service.calls.map((c) => [c.method, c.url]), [["DELETE", SVC + first], ["POST", SVC]]);
+  assert.notEqual(party(ana).short, first);
+  const bea = await device(net, "bea");
+  bea.kino.log = ana.kino.log;
+  await press(bea, "joinShort", T0 + 200, { value: { joinShortCode: party(ana).short }, values: { myName: "Bea" } });
+  await press(ana, "leave", T0 + 300);
+  const secrets = [first, party(bea).short, party(bea).code, party(bea).hostWords].filter(Boolean);
+  for (const line of logged) for (const x of secrets) assert.ok(!line.includes(x), "no code or words in the logs");
+});
+
+// ---------- the step-by-step tab when not in a room (owner, 2026-10-27), inline loading, focus, small text ----------
+
+/** Kino's panel state after an answer: its `state` merged (a null removes a key). */
+function applyAnswer(dev, a) {
+  if (!a || !a.state) return;
+  const st = { ...(dev.state || {}) };
+  for (const [k, v] of Object.entries(a.state)) { if (v === null) delete st[k]; else st[k] = v; }
+  dev.state = st;
+}
+
+/** The tree of [step] for a fresh party on [device] (a saved name or none), as Kino reads it. */
+async function stepTree(step, { device = "phone", name = "", target = null, extra = {} } = {}) {
+  const p = await P();
+  const party0 = p.newParty(name);
+  const state = { inputs: {}, ui: {}, wizStep: step, ...(target ? { joinTarget: target } : {}), ...extra };
+  const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device }), "watch-party", LATINO), { state });
+  const raw = plain(p.view(party0, ctx, T0));
+  const r = checkPanelScreen(raw, "es");
+  assert.deepEqual(r.dropped, [], `${step}/${device}`);
+  return { raw, root: r.panel.root };
+}
+const visible = (root) => all(root).filter((n) => !n.hidden);
+const buttonsOf = (root) => visible(root).filter((n) => n.type === "button");
+const inputsOf = (root) => visible(root).filter((n) => ["textInput", "textArea"].includes(n.type));
+/** Every waiting trigger (raw tree) is followed at once by its own progress row, in the same list. */
+function rowsFollowTriggers(raw) {
+  const walk = (n) => {
+    const kids = Array.isArray(n && n.children) ? n.children : [];
+    kids.forEach((c, i) => {
+      const tap = c.onPressed || c.onTap || c.onSubmitted || (c.action && c.action.onTap);
+      const show = tap && Array.isArray(tap.ui) ? tap.ui.find((op) => typeof op.show === "string" && op.show.startsWith("busy.")) : null;
+      if (show) {
+        assert.equal(kids[i + 1] && kids[i + 1].key, show.show, `${c.key || c.type}: its row right after it`);
+        assert.equal(kids[i + 1].hidden, true);
+        assert.equal(kids[i + 1].children.length, 1, "one progress, one label");
+      }
+      walk(c);
+    });
+  };
+  walk(raw.root);
+}
+
+test("wizard: each step's visible controls on phone and TV (home: two buttons; one input per name/code step), small trees", async () => {
+  const target = { words: "integrating-salad-alto-kurt", code: "123456789012", short: "41408" };
+  for (const device of ["phone", "tv"]) {
+    for (const name of ["", "Ana"]) {
+      const home = await stepTree("home", { device, name });
+      assert.equal(buttonsOf(home.root).length, 2, "home: exactly two buttons");
+      assert.equal(inputsOf(home.root).length, 0);
+      assert.deepEqual(buttonsOf(home.root).map((b) => b.label), ["Crear sala", "Unirme a sala"]);
+      rowsFollowTriggers(home.raw);
+    }
+    const c1 = await stepTree("c1", { device });
+    assert.deepEqual(inputsOf(c1.root).map((n) => n.key), ["myName"]);
+    assert.deepEqual(buttonsOf(c1.root).map((b) => b.key), ["btnCreate", "btnBack"]);
+    const j1 = await stepTree("j1", { device });
+    assert.deepEqual(inputsOf(j1.root).map((n) => n.key), ["joinShortCode"]);
+    assert.equal(all(j1.root).find((n) => n.key === "joinShortCode").kind, "number");
+    const j1keys = buttonsOf(j1.root).map((b) => b.key);
+    if (device === "tv") assert.deepEqual(j1keys, ["btnLookup", "btnLink", "btnWords", "btnBack"]);
+    else assert.deepEqual(j1keys, ["btnLookup", "btnPaste", "btnScan", "btnWords", "btnBack"]);
+    const j1b = await stepTree("j1b", { device });
+    assert.deepEqual(inputsOf(j1b.root).map((n) => n.key), ["joinWords", "joinCode"]);
+    const j2 = await stepTree("j2", { device, target });
+    assert.deepEqual(inputsOf(j2.root).map((n) => n.key), ["myName"]);
+    assert.deepEqual(buttonsOf(j2.root).map((b) => b.key), ["btnJoinTarget", "btnBack"]);
+    const jp = await stepTree("jp", { device });
+    if (device === "tv") assert.deepEqual(inputsOf(jp.root).map((n) => n.key), ["joinShortCode"], "a TV never shows the paste step");
+    else assert.deepEqual(inputsOf(jp.root).map((n) => n.key), ["joinPaste"]);
+    for (const t of [c1, j1, j1b, j2, jp]) {
+      assert.ok(all(t.root).length <= 25, `${all(t.root).length} nodes`);
+      assert.ok(buttonsOf(t.root).some((b) => b.key === "btnBack"), "«Atrás» on every step after the first");
+      rowsFollowTriggers(t.raw);
+    }
+    // j2 without a checked room falls back to the code step.
+    assert.deepEqual(inputsOf((await stepTree("j2", { device })).root).map((n) => n.key), ["joinShortCode"]);
+  }
+});
+
+test("wizard: transitions and «Atrás» are pure state changes with a focus on the new step's first control", async () => {
+  const net = createNet();
+  const eva = await device(net, "eva");
+  const go = async (to) => { const a = await press(eva, "wiz", T0, { arg: to }); applyAnswer(eva, a); return a; };
+  for (const [to, focus] of [["c1", "myName"], ["home", "btnHomeJoin"], ["j1", "joinShortCode"], ["j1b", "joinWords"], ["j1", "joinShortCode"], ["jp", "joinPaste"], ["j1", "joinShortCode"], ["home", "btnHomeJoin"]]) {
+    const a = await go(to);
+    assert.equal(a.state.wizStep, to);
+    assert.equal(a.focus, focus, to);
+  }
+  assert.equal(eva.kino.storage.get("party"), null, "a step change opens no room and keeps nothing");
+});
+
+test("wizard: no saved name → the name is asked once (after the code was checked) and saved; Back from it keeps the code", async () => {
+  let { net, host, t } = await room([]);
+  const short = party(host).short;
+  const eva = await device(net, "eva");
+  eva.state = { wizStep: "j1" };
+  let a = await press(eva, "lookupShort", t, { values: { joinShortCode: short } });
+  assert.deepEqual([a.state.wizStep, a.focus], ["j2", "myName"]);
+  applyAnswer(eva, a);
+  // «Atrás» from the name step: the code step with the code still typed.
+  a = await press(eva, "wiz", t + 10, { arg: "j1" });
+  applyAnswer(eva, a);
+  const { raw } = await panel(eva, t + 20);
+  const field = JSON.stringify(raw).includes(`"value":"${short}"`);
+  assert.ok(field, "the typed code is kept");
+  a = await press(eva, "lookupShort", t + 30, { values: { joinShortCode: short } });
+  applyAnswer(eva, a);
+  a = await press(eva, "joinTarget", t + 40, { values: { myName: "Eva" } });
+  assert.equal(a.toast.role, "success");
+  assert.equal(eva.kino.storage.get("name"), "Eva", "saved for next time");
+  assert.equal(a.state.wizStep, "home");
+  t = await rounds([host, eva], t + 100, 2);
+  assert.ok(party(host).roster.some((m) => m.name === "Eva"));
+});
+
+test("wizard: with a saved name, «Crear sala» creates at once and «Siguiente» joins at once (no name step)", async () => {
+  const net = createNet();
+  const ana = await device(net, "ana");
+  ana.kino.storage.set("name", "Ana");
+  const { panel: shown0 } = await panel(ana, T0);
+  const create = all(shown0.root).find((n) => n.key === "btnCreate");
+  assert.deepEqual(create.onTap.ui, [{ show: "busy.create" }, { disable: "btnCreate" }], "home's «Crear sala» waits on the room itself");
+  const a = await press(ana, "create", T0, { values: {} });
+  assert.equal(a.toast.role, "success");
+  assert.equal(party(ana).me.name, "Ana");
+  const bea = await device(net, "bea");
+  bea.kino.storage.set("name", "Bea");
+  bea.state = { wizStep: "j1" };
+  const { raw } = await panel(bea, T0 + 10);
+  rowsFollowTriggers(raw);
+  assert.ok(JSON.stringify(raw).includes("Uniéndose a la sala…"), "with a saved name the lookup's row says it is joining");
+  const j = await press(bea, "lookupShort", T0 + 20, { values: { joinShortCode: party(ana).short } });
+  assert.equal(j.toast.role, "success");
+  assert.equal(j.state.wizStep, "home");
+  assert.equal(party(bea).phase, "party");
+  // The other ways in follow the same rule: a scanned QR and words + code join at once with a saved name.
+  const caro = await device(net, "caro");
+  caro.kino.storage.set("name", "Caro");
+  caro.scans.push(`https://${party(ana).hostWords}.trycloudflare.com/?c=${party(ana).code}`);
+  assert.equal((await press(caro, "scanJoin", T0 + 30)).toast.role, "success");
+  const dani = await device(net, "dani");
+  const w = await press(dani, "wordsNext", T0 + 40, { values: { joinWords: party(ana).hostWords, joinCode: party(ana).code } });
+  assert.deepEqual([w.state.wizStep, w.focus], ["j2", "myName"], "no saved name: the name step");
+});
+
+test("wizard: errors stay in place on the code step (404, invalid, network) with a retry whose row follows it", async () => {
+  const net = createNet();
+  const eva = await device(net, "eva");
+  eva.state = { wizStep: "j1" };
+  for (const [code, setup, es, retry] of [
+    ["99999", () => {}, "Ese código no existe o ya venció", true],
+    ["55555", () => net.service.codes.set("55555", "https://evil.example/?c=1234"), "Ese código no es válido", false],
+    ["12345", () => { net.service.down = true; }, "No pude consultar el código; reintenta", true],
+    ["12", () => { net.service.down = false; }, "Escribe los 5 números del código", false],
+  ]) {
+    setup();
+    const a = await press(eva, "lookupShort", T0, { values: { joinShortCode: code } });
+    assert.equal(a.state.error.es, es);
+    assert.equal(a.state.wizStep, undefined, "still on the code step");
+    assert.equal(a.focus, retry ? "btnRetry" : "joinShortCode", "a failed lookup: on «Reintentar»; a typing mistake: back on the field");
+    applyAnswer(eva, a);
+    const { raw, panel: shown } = await panel(eva, T0 + 1);
+    const kids = raw.root.children;
+    assert.deepEqual([kids[0].key, kids[0].text, kids[0].color], ["errText", es, "error"], "the error in place, at the top");
+    if (retry) {
+      assert.deepEqual([kids[1].key, kids[1].type, kids[1].labelText], ["btnRetry", "ElevatedButton", "Reintentar"]);
+      assert.deepEqual(kids[1].onPressed, { ui: [{ show: "busy.retry" }], event: "lookupShort" });
+      assert.equal((await P()).focusables(raw.root)[0], "btnRetry", "the first control in D-pad order");
+    } else assert.ok(!kids.some((n) => n.key === "btnRetry"));
+    rowsFollowTriggers(raw);
+    assert.ok(all(shown.root).some((n) => n.key === a.focus), "the focus is on screen");
+  }
+});
+
+test("«Cambiar mi nombre»: a one-field screen in the room; it renames now (host and guest) and is saved for next time", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  bea.tab = "room";
+  let a = await press(bea, "renameOpen", t);
+  assert.equal(a.focus, "myName");
+  applyAnswer(bea, a);
+  const { panel: shown } = await panel(bea, t + 1);
+  assert.deepEqual(inputsOf(shown.root).map((n) => n.key), ["myName"]);
+  a = await press(bea, "rename", t + 2, { values: { myName: "Beatriz" } });
+  applyAnswer(bea, a);
+  assert.equal(bea.kino.storage.get("name"), "Beatriz");
+  t = await rounds([host, bea], t + 10, 3);
+  assert.ok(party(host).roster.some((m) => m.name === "Beatriz"), "the host's list shows the new name");
+  a = await press(host, "rename", t, { values: { myName: "Anita" } });
+  t = await rounds([host, bea], t + 10, 3);
+  assert.equal(party(bea).hostName, "Anita");
+});
+
+test("focus: every answer names a control that exists in the view it leads to (steps, loading done, errors, joined, the link QR)", async () => {
+  let { net, host, t } = await room([]);
+  const short = party(host).short;
+  const tv = await device(net, "tv", { kind: "tv" });
+  tv.state = { wizStep: "j1" };
+  const answers = [];
+  const record = async (dev, name, o) => {
+    const a = await press(dev, name, t, o);
+    answers.push([dev, a]);
+    applyAnswer(dev, a);
+    const { panel: shown } = await panel(dev, t + 1);
+    assert.ok(all(shown.root).some((n) => n.key === a.focus), `${dev.id} after ${name}: ${a.focus}`);
+    return a;
+  };
+  await record(tv, "linkStart", { values: {} });
+  const { raw: linkRaw } = await panel(tv, t);
+  assert.equal(linkRaw.root.children.find((n) => n.type === "QrImage") ? linkRaw.root.children.findIndex((n) => n.type === "QrImage") : -1, 0, "the QR first");
+  assert.equal(answers.at(-1)[1].focus, "btnLinkCancel");
+  const eva = await device(net, "eva");
+  eva.state = { wizStep: "j1" };
+  await record(eva, "lookupShort", { values: { joinShortCode: "99999" } });
+  await record(eva, "lookupShort", { values: { joinShortCode: short } });
+  await record(eva, "wiz", { arg: "j1" });
+  await record(eva, "lookupShort", { values: { joinShortCode: short } });
+  await record(eva, "joinTarget", { values: { myName: "Eva" } });
+  assert.ok(answers.every(([, a]) => typeof a.focus === "string"), "every answer names a focus");
+});
+
+test("text sizes: no style above h4 but the short code; every text and banner line at most 120 characters", async () => {
+  const raws = [];
+  for (const device of ["phone", "tv"]) {
+    for (const step of ["home", "c1", "j1", "j1b", "jp"]) raws.push((await stepTree(step, { device })).raw);
+    raws.push((await stepTree("j2", { device, target: { words: "integrating-salad-alto-kurt", code: "1234", short: "41408" } })).raw);
+  }
+  let { host, guests: [bea], net, t } = await room(["Bea"]);
+  await say(bea, "una línea de chat bastante larga ".repeat(8), t);
+  t = await rounds([host, bea], t + 10, 2);
+  for (const d of [host, bea]) for (const tab of [undefined, "room"]) { d.tab = tab; raws.push((await panel(d, t)).raw); }
+  net.down.add(party(host).hostWords);
+  t = await rounds([bea], t, 5);
+  raws.push((await panel(bea, t)).raw);
+  let shortSeen = 0;
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (n.key === "chat") return; // people's own messages
+    assert.ok(!(typeof n.style === "string" && /^h[1-4]$/.test(n.style)), JSON.stringify(n).slice(0, 120));
+    if (n.key === "shortCode") { assert.deepEqual([n.style, n.bold], ["h5", true]); shortSeen++; }
+    if ((n.type === "Text" || n.type === "MaterialBanner") && typeof n.text === "string") assert.ok(Array.from(n.text).length <= 120, n.text);
+    for (const c of Array.isArray(n.children) ? n.children : []) walk(c);
+  };
+  for (const r of raws) walk(r.root);
+  assert.ok(shortSeen >= 1, "the short code: bold, modest");
+});
+
+// ---------- owner feedback from the real TV on the room view (2026-10-27) ----------
+
+test("room view: no «Fiesta» or room-name heading; a header row (status left, sync icon right for guests); messages above the input", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  await say(bea, "hola", t);
+  t = await rounds([host, bea], t + 10, 2);
+  for (const device of ["phone", "tv"]) {
+    for (const d of [host, bea]) {
+      d.kind = device;
+      d.tab = undefined;
+      const { raw } = await panel(d, t);
+      const json = JSON.stringify(raw.root);
+      assert.ok(!/"text":"(Fiesta|Sala de [^"]*)"/.test(json), "no redundant heading");
+      const kids = raw.root.children;
+      const header = kids.find((n) => n.key === "headerRow");
+      assert.ok(header, "a header row");
+      assert.equal(header.children[0].type, "Text");
+      const sync = header.children.find((n) => n.key === "btnSync");
+      if (d === bea) {
+        assert.equal(header.children.at(-1), sync, "the sync icon on the right");
+        assert.deepEqual([sync.type, sync.icon, sync.labelText, sync.labelTextEn], ["IconButton", "sync", "Sincronizar", "Sync"]);
+        assert.equal(kids[kids.indexOf(header) + 1].key, "busy.sync", "its progress row right under the header");
+      } else assert.equal(sync, undefined, "the host has nothing to sync to");
+      // Order: messages, then the (hidden) reactions, then the input row with the field, the emoji toggle and the send arrow.
+      const keys = kids.map((n) => n.key);
+      const list = keys.indexOf("chat");
+      const palette = keys.indexOf("emojiPalette");
+      const input = keys.indexOf("inputRow");
+      assert.ok(list > keys.indexOf("headerRow") && list < palette && palette < input, keys.join(","));
+      assert.equal(kids[palette].hidden, true, "reactions hidden until the emoji button");
+      const row = kids[input];
+      assert.deepEqual(row.children.map((n) => n.key), ["chatText", "emojiToggle"], "the field (its send icon inside it) and the emoji toggle");
+      assert.equal(row.gap, device === "tv" ? 4 : 0);
+      const field = row.children[0];
+      assert.equal(field.onSubmitted, "send", "the keyboard's own send action");
+      assert.deepEqual([field.trailingIcon, field.trailingLabel, field.trailingLabelEn, field.onTrailingTap], ["send", "Enviar", "Send", "send"], "the send icon inside the field");
+      const toggle = row.children[1];
+      assert.deepEqual([toggle.type, toggle.icon, toggle.labelText, toggle.labelTextEn], ["IconButton", "mood", "Emojis", "Emoji"], "icon-only (the label is for screen readers)");
+      assert.deepEqual(row.children[1].onPressed, { ui: [{ toggle: "emojiPalette" }] });
+      assert.deepEqual(kids[palette].children[0].onPressed, { ui: [{ hide: "emojiPalette" }], event: "emoji" }, "one reaction sent closes them");
+      assert.deepEqual(bubblesOf(kids[list]).at(-1), { mine: d === bea, text: "hola" }, "the newest at the bottom");
+      // As Kino reads it: the icon buttons keep their label as the accessible name and draw no text.
+      const { panel: shown } = await panel(d, t);
+      // Kino keeps the send icon in the field (its own D-pad stop on a TV: field, send, emoji) and nothing is dropped.
+      const shownField = all(shown.root).find((n) => n.key === "chatText");
+      assert.deepEqual([shownField.trailing.icon, shownField.trailing.label], ["send", "Enviar"]);
+      assert.ok(!all(shown.root).some((n) => n.key === "btnSend"), "no separate send button");
+      const toggleNode = all(shown.root).find((n) => n.key === "emojiToggle");
+      assert.deepEqual([toggleNode.variant, toggleNode.icon, toggleNode.label], ["icon", "mood", "Emojis"]);
+    }
+  }
+});
+
+test("room view: a TV display seat sees its reactions directly and no input row", async () => {
+  const p = await P();
+  const s = p.newParty("Bea TV");
+  Object.assign(s, { phase: "party", role: "guest", code: "123456789012", hostWords: "ana-door-a", handle: "j1", hostName: "Ana" });
+  s.me = { ...s.me, role: "display", of: "m0000001", mid: "m0000002" };
+  const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device: "tv" }), "watch-party", LATINO));
+  const raw = plain(p.view(s, ctx, T0));
+  const kids = raw.root.children;
+  const palette = kids.find((n) => n.key === "emojiPalette");
+  assert.equal(palette.hidden, undefined, "shown: reactions are all a display seat can send");
+  assert.equal(palette.children[0].onPressed, "emoji");
+  assert.ok(!kids.some((n) => n.key === "inputRow"));
+  assert.deepEqual(checkPanelScreen(raw, "es").dropped, []);
+});
+
+test("recovery screens: ordinary text and an ordinary button (no banner, no large text), the explanation in at most 120 characters", async () => {
+  let { net, host, guests: [bea, caro], t } = await room(["Bea", "Caro"]);
+  net.down.add(party(host).hostWords);
+  t = await rounds([bea, caro], t, 5);
+  await press(caro, "retryHost", t);
+  for (const d of [bea, caro]) {
+    for (const device of ["phone", "tv"]) {
+      d.kind = device;
+      const { raw, panel: shown } = await panel(d, t + 100);
+      const kids = raw.root.children;
+      assert.ok(!kids.some((n) => n.type === "MaterialBanner"), "a screen, not a banner");
+      const text = kids.find((n) => n.type === "Text");
+      assert.equal(text.style, "p");
+      assert.ok(Array.from(text.text).length <= 120);
+      const main = kids.find((n) => n.key === "btnRecover");
+      assert.equal(main.type, "ElevatedButton");
+      if (main.onPressed && main.onPressed.ui) assert.ok(kids[kids.indexOf(main) + 1].key.startsWith("busy."), "a waiting press has its progress right under it");
+      assert.ok(kids.some((n) => n.key === "btnLeave"));
+      assert.ok(!/"style":"h[1-4]"/.test(JSON.stringify(raw)));
+      assert.ok(!texts(shown.root).some((x) => /^Sala de /.test(x)));
+    }
+  }
+});
+
+test("the chat looks like a chat: mine on the right in primary, the others on the left with the name once per run, notes centred", async () => {
+  let { host, guests: [bea, caro], t } = await room(["Bea", "Caro"]);
+  await say(bea, "hola", t);
+  await say(bea, "¿empezamos?", t + 1);
+  t = await rounds([host, bea, caro], t + 10, 2);
+  await say(host, "sí", t);
+  t = await rounds([host, bea, caro], t + 10, 2);
+  await press(caro, "emoji", t, { arg: "0" });
+  t = await rounds([host, bea, caro], t + 10, 2);
+  for (const device of ["phone", "tv"]) {
+    bea.kind = device;
+    const { raw } = await panel(bea, t);
+    const items = rawChat(raw).items.filter((n) => n.type === "Column");
+    assert.equal(items.length, 3, "three runs: Bea twice, Ana, Caro");
+    const [mine, ana, caroRun] = items;
+    // Mine: right-aligned, an 80 dp gutter on the left, no name, primary bubbles.
+    assert.deepEqual([mine.crossAxisAlignment, mine.fill, mine.padding, mine.margin], ["end", true, { start: 48 }, { start: 32 }]);
+    assert.deepEqual(mine.children.map((n) => [n.type, n.color, n.borderRadius, n.children[0].text]), [["Card", "primary", "large", "hola"], ["Card", "primary", "large", "¿empezamos?"]]);
+    // The others: left-aligned, the gutter on the right, the name once above the run, neutral bubbles.
+    assert.deepEqual([ana.crossAxisAlignment, ana.padding, ana.margin], ["start", { end: 48 }, { end: 32 }]);
+    assert.deepEqual(ana.children.map((n) => n.type === "Card" ? ["Card", n.variant, n.children[0].text] : [n.type, n.style, n.color, n.text]), [["Text", "caption", "muted", "Ana"], ["Card", "filled", "sí"]]);
+    // A reaction: a larger glyph, no bubble.
+    assert.deepEqual(caroRun.children.map((n) => [n.type, n.style || "", n.text]), [["Text", "caption", "Caro"], ["Text", "h4", party(caro).hist.at(-1).x]]);
+    assert.deepEqual(checkPanelScreen(raw, "es").dropped.filter((l) => l !== COPY_DROP), []);
+  }
+  // A note (on the host: someone left) is a small centred muted line at the end of the list.
+  await press(caro, "leave", t);
+  t = await rounds([host, bea], t + 100, 2);
+  const note = rawChat((await panel(host, t)).raw).items.at(-1);
+  assert.deepEqual([note.type, note.style, note.color, note.crossAxisAlignment, note.fill], ["Text", "caption", "muted", "center", true]);
+});
+
+test("the chat's tree stays small: 40 messages alternating between two people take at most 150 nodes", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  for (let i = 0; i < 20; i++) {
+    await say(bea, "b" + i, t);
+    t = await rounds([host, bea], t + 1, 1, 100);
+    await say(host, "a" + i, t);
+    t = await rounds([host, bea], t + 1, 1, 100);
+    t += 2000;
+  }
+  t = await rounds([host, bea], t, 2);
+  const { raw } = await panel(bea, t);
+  const list = rawChat(raw);
+  const nodes = all({ children: list.items }).length - 1;
+  assert.equal(bubblesOf(list).length, 40);
+  assert.ok(nodes <= 150, `${nodes} nodes`);
+});
+
+test("focus on a TV: joining or creating opens the chat with the D-pad on its input; send and reactions bring it back; ticks keep the input's key", async () => {
+  const inputOf = (raw) => all(raw.root).find((n) => n.key === "chatText");
+  const net = createNet();
+  const ana = await device(net, "ana");
+  ana.kind = "tv";
+  const created = await press(ana, "create", T0, { values: { myName: "Ana" } });
+  assert.deepEqual([created.state.tab, created.focus], ["chat", "chatText"]);
+  ana.state = { ...(ana.state || {}), ...created.state };
+  let t = T0 + 100;
+  const bea = await device(net, "bea");
+  bea.kind = "tv";
+  const short = party(ana).short;
+  const joined = await press(bea, "joinShort", t, { value: { joinShortCode: short }, values: { myName: "Bea" } });
+  assert.deepEqual([joined.state.tab, joined.focus], ["chat", "chatText"]);
+  bea.state = { ...(bea.state || {}), ...joined.state };
+  t = await rounds([ana, bea], t + 100, 2);
+  // The tab the answer leads to has that field, in the input row at the bottom.
+  const first = (await panel(bea, t)).raw;
+  assert.equal(inputOf(first).type, "TextField");
+  const order = (raw) => raw.root.children.map((n) => n.key).filter((k) => ["chat", "emojiPalette", "inputRow"].includes(k));
+  // Messages arriving on ticks: the same key, in the same place.
+  for (let i = 0; i < 3; i++) {
+    await say(ana, "mensaje " + i, t);
+    t = await rounds([ana, bea], t + 10, 2);
+    const raw = (await panel(bea, t)).raw;
+    assert.equal(raw.focus, undefined, "a tick never moves the focus (Kino keeps it by key)");
+    assert.deepEqual(order(raw), ["chat", "emojiPalette", "inputRow"]);
+    assert.equal(all(raw.root).find((n) => n.key === "inputRow").children[0].key, "chatText");
+  }
+  // Sending (the keyboard's action or the arrow) and a reaction from the palette answer with the focus on the input.
+  assert.equal((await say(bea, "hola", t + 20)).focus, "chatText");
+  assert.equal((await press(bea, "emoji", t + 30, { arg: "1" })).focus, "chatText");
+});
+
+test("focus on recovery: every recovery state opens on its one way on, «btnRecover», first in D-pad order (errors add no second button)", async () => {
+  const p = await P();
+  const kinds = ["newHost", "lost", "redirect", "dropped", "noAnswer", "cantCheck", "waitOthers", "takeOver", "moved", "closedMine", "ended", "linked", "awaiting"];
+  for (const kind of kinds) {
+    for (const error of [null, { es: "El anfitrión no responde", en: "The host is not answering", retry: "retryHost" }]) {
+      const s = p.newParty("Bea");
+      Object.assign(s, { phase: "party", role: "guest", code: "123456789012", hostWords: "ana-door-a", handle: "j1", hostName: "Ana" });
+      if (kind === "awaiting") s.awaiting = { name: "Caro" };
+      else s.banner = { kind, name: "Caro", count: 2, at: T0 };
+      const ctx = fakePanelScreenContext(foreignContext(fakeContext("movie:1", { device: "tv" }), "watch-party", LATINO), { state: { inputs: {}, ui: {}, ...(error ? { error } : {}) } });
+      const raw = plain(p.view(s, ctx, T0));
+      const keys = p.focusables(raw.root);
+      assert.equal(keys[0], "btnRecover", `${kind}: ${keys}`);
+      assert.equal(all(raw.root).filter((n) => n.type === "ElevatedButton").length, 1, `${kind}: one primary button`);
+      assert.ok(!keys.includes("btnRetry") && !keys.includes("chatText"), kind);
+      assert.ok(keys.length <= 2, `${kind}: the way on and at most «Salir de la sala»`);
+    }
+  }
+});
+
+test("focus on recovery: from the chat input to «btnRecover» (a tick keeps the key in place; a failed press names it)", async () => {
+  let { net, host, guests: [bea], t } = await room(["Bea"]);
+  bea.kind = "tv";
+  const before = (await panel(bea, t)).raw;
+  assert.equal(focusFirstField(before), "chatText");
+  net.down.add(party(host).hostWords);
+  t = await rounds([bea], t, 5);
+  const after = (await panel(bea, t)).raw;
+  const p = await P();
+  assert.equal(p.focusables(after.root)[0], "btnRecover", "the screen that replaced the chat opens on its way on");
+  assert.equal((await panel(bea, t + 10)).raw.root.children.findIndex((n) => n.key === "btnRecover"), after.root.children.findIndex((n) => n.key === "btnRecover"), "same key, same place on the next tick");
+  const a = await press(bea, "retryHost", t + 20);
+  assert.equal(a.focus, "btnRecover", "the press that fails again keeps the D-pad on it");
+});
+
+test("the emoji palette on phone and TV: hidden until the toggle, the toggle shows and hides it, a reaction sends, hides it and focuses the input", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  await say(host, "hola", t);
+  t = await rounds([host, bea], t + 10, 2);
+  for (const kind of ["phone", "tv"]) {
+    bea.kind = kind;
+    const { raw } = await panel(bea, t);
+    const kids = raw.root.children;
+    const palette = kids.find((n) => n.key === "emojiPalette");
+    assert.equal(palette.hidden, true, `${kind}: hidden by default`);
+    assert.deepEqual([palette.wrap, palette.children.length, palette.children.every((b) => b.span === 3)], [true, 8, true], "one compact block: two lines of four");
+    assert.deepEqual(palette.children.map((b) => b.key), Array.from({ length: 8 }, (_, i) => "emoji" + i), "stable keys");
+    const toggle = all(raw.root).find((n) => n.key === "emojiToggle");
+    assert.deepEqual(toggle.onPressed, { ui: [{ toggle: "emojiPalette" }] }, "no round trip: Kino shows it, and hides it on the next press");
+    // The list keeps the room left (flex) and is the same with the palette shown: nothing pushed off.
+    const list = kids.find((n) => n.key === "chat");
+    assert.equal(list.flex, 1);
+    const shown = plain({ ...raw, root: { ...raw.root, children: kids.map((n) => n.key === "emojiPalette" ? { ...n, hidden: false } : n) } });
+    assert.equal(JSON.stringify(shown.root.children.find((n) => n.key === "chat")), JSON.stringify(list), "the list's nodes do not change");
+    assert.deepEqual(palette.children[2].onPressed, { ui: [{ hide: "emojiPalette" }], event: "emoji" });
+    const a = await press(bea, "emoji", t + 1, { arg: "2" });
+    assert.equal(a.focus, "chatText", `${kind}: back on the input`);
+    t = await rounds([host, bea], t + 20, 2);
+    const after = (await panel(bea, t)).raw;
+    assert.equal(after.root.children.find((n) => n.key === "emojiPalette").hidden, true, "still hidden after a reaction");
+    assert.equal(bubblesOf(rawChat(after)).at(-1).text, (await P()).EMOJIS[2], "the reaction is in the list");
+  }
 });
