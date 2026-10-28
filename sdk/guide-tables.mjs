@@ -44,7 +44,10 @@ const WIDGET_TEXT = {
   table: "a table of `TableRow`s holding `TableCell`s (`text` or `children`, `colSpan`, `crossAxisAlignment`)",
 };
 /** Properties a widget takes besides the ones contract.json lists in layoutProps (the d.ts has the rest). */
-const WIDGET_PROPS = { list: ["onEndReached", "loadingMore", "done"], titleRail: ["onEndReached", "loadingMore", "done"], titleGrid: ["onEndReached", "loadingMore", "done"], popup: ["onClose", "buttons", "items"] };
+const WIDGET_PROPS = {
+  list: ["onEndReached", "loadingMore", "done", S.listHints.field], titleRail: ["onEndReached", "loadingMore", "done"], titleGrid: ["onEndReached", "loadingMore", "done"],
+  popup: ["onClose", "buttons", "items", S.declaredPopups.anchor.field], text: [S.textTime.field, S.textTime.formatField],
+};
 const GO_TEXT = {
   title: "this plugin's title page (`ref`, `kind`; `id`, `title` and `adult` for a title that is not on the canvas)",
   play: "plays this plugin's title (`ref`, `kind`, as `title`)",
@@ -140,7 +143,7 @@ export const TABLES = {
       padding: `${S.spacingScale.join(", ")}, or per side (\`x\`, \`y\`, \`top\`, \`end\`, \`bottom\`, \`start\`)`,
       margin: `${S.spacingScale.join(", ")}, or per side`,
       gap: S.spacingScale.join(", "),
-      radius: S.radiusTokens.map((x) => `\`${x}\``).join(", "),
+      radius: `${S.radiusTokens.map((x) => `\`${x}\``).join(", ")}, or per corner (${S.corners.keys.map((x) => `\`${x}\``).join(", ")}; an omitted one \`${S.corners.default}\`)`,
       w: S.sizeScale.join(", "), h: S.sizeScale.join(", "), minH: S.sizeScale.join(", "),
       fill: "`true`: the parent's whole width",
       weight: `1 to ${S.limits.maxWeight}: its share of a \`Row\` or \`Column\``,
@@ -149,6 +152,7 @@ export const TABLES = {
       color: S.colorRoles.map((x) => `\`${x}\``).join(", "),
       span: `1 to ${S.limits.gridColumns} or \`"auto"\`, in a \`Row\` with \`wrap: true\``,
       offset: `0 to ${S.limits.gridColumns - 1}, in a \`Row\` with \`wrap: true\``,
+      maxWidthFraction: `${S.maxWidthFraction.min} to ${S.maxWidthFraction.max} in steps of ${S.maxWidthFraction.step}: at most that share of the parent's width (exactly, with \`fill\`)`,
     }[p] || "see `kino.d.ts`";
     const name = canon(p);
     return [`\`${name}\``, name === p ? "" : `\`${p}\``, values];

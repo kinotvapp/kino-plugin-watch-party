@@ -102,11 +102,13 @@ export const PROPS = {
   scroll: [kids(), ["direction", "`vertical` \\| `horizontal`", "`vertical`", "a `ListView` or rail inside a scroll of the same direction is drawn all at once"]],
   grid: [kids(), ["columns", `1 to ${L.maxGridColumns}`, "`2`", "equal columns, filled row by row"]],
   text: [
-    ["text", "string", "required", `1 to ${n(L.maxTextChars)} characters, plain (no markup, no links); newlines kept`],
+    ["text", "string", "required (optional with `time`)", `1 to ${n(L.maxTextChars)} characters, plain (no markup, no links); newlines kept; with a \`time\` it is its prefix`],
     ["textEn", "string", "none", "the English twin, shown when the app is in English"],
     ["style", codes(TEXT_STYLES, " \\| "), "`p`", "Kino's type scale ([Text scale](#text-scale)); `display`, `title`, `subtitle`, `body` read as `h1`, `h3`, `h4`, `p`"],
     ["maxLines", "integer ≥ 1", "none", "cut with an ellipsis"],
     ["bold", "boolean", "`false`", "headings are bold already; `false` never thins one"],
+    [S.textTime.field, "epoch ms", "none", `a whole number 0 to ${n(S.textTime.maxMs)}: Kino writes the time itself in the app's language ([Text with a time](#text-time))`],
+    [S.textTime.formatField, codes(S.textTime.formats, " \\| "), code(S.textTime.formats[0]), `\`relative\` («hace 2 min», rewritten every ${S.textTime.refreshMs / 60000} minute while shown, no call to you) or \`clock\` («18:42», the device's 12/24 h)`],
   ],
   image: [
     ["url", "https URL", "required without `fallback`", "a public https host (no declaration needed); with a `fallback`, no `url` draws the fallback (an empty or refused one too, logged)"],
@@ -126,6 +128,7 @@ export const PROPS = {
     ["empty", NODE, "none", "drawn when there are no items"],
     ["columns", `1 to ${L.maxGridColumns}`, "`1`", "a grid of items"],
     ["stickToBottom", "boolean", "`false`", "opens at the last item and follows new ones while the person is at the end; one column, in a list that scrolls itself ([layout fill](#layout-fill-a-chat-tab))"],
+    [S.listHints.field, "boolean", "`false`", "items appended while the person reads higher up show Kino's own «↓ Nuevos» chip (its text, never yours); a tap goes to the end ([new items](#new-items-hint))"],
     ...paging(),
   ],
   button: [
@@ -175,7 +178,7 @@ export const PROPS = {
     ["value", "string or string[]", "none", "the picked value (a list with `multiple`); a value naming no option is dropped"],
   ],
   tabs: [
-    ["tabs", "`{ value, label, labelEn? }[]`", "required", `1 to ${L.maxListItems}`],
+    ["tabs", "`{ value, label, labelEn?, badge? }[]`", "required", `1 to ${L.maxListItems}; a tab's \`badge\` sits beside its label ([shared properties](#shared-properties))`],
     ["value", "string", "the first tab", "the selected tab; NOT in `state.inputs`: keep it in your state from `onChanged`"],
     ["onChanged", ACTION, "none", "its event's `value` is the tab's value"],
   ],
@@ -219,6 +222,7 @@ export const PROPS = {
     ["buttons", "`{ label, labelEn?, event?, arg?, variant? }[]`", "none", `a dialog's, at most ${L.maxDialogButtons}; one without \`event\` closes it`],
     ["items", "`{ label, labelEn?, icon?, onTap }[]`", "required for a menu", `1 to ${L.maxMenuItems}; the menu closes first`],
     ["onClose", "event name or `{ ui?, event?, arg? }`", "none", "runs after the person dismissed it (Back, Kino's close, a tap outside), never after its own buttons"],
+    [S.declaredPopups.anchor.field, "a node's key", "none", "drawn next to that node, over the content, taking no room ([anchored pop-up](#anchored-popup)); the only pop-up a player panel draws"],
   ],
   form: [kids("nodes (its fields among them)"), ["onSubmitted", ACTION, "required", "runs only when every field passes; its event's `value` holds every field by key"]],
   settings: [["keys", "string[]", "all settings", "only those settings, in that order; each setting shows at most once per screen"]],
@@ -335,13 +339,16 @@ const COMMON = [
   ["devices", codes(S.devices, ", ") + " (a list)", "everywhere", "drawn only there; an unknown name drops the node"],
   ["sizes", codes(S.sizeClasses, ", ") + " (a list)", "every size", "drawn only at those width classes"],
   ["testKey", "string", "none", `1 to ${L.maxTestKeyChars} characters, for tests, never drawn`],
+  ["autofocus", "boolean", "`false`", "a node that takes focus: where focus goes when a render left it nowhere ([shared properties](#shared-properties))"],
+  ["selected", "boolean", "none", "a button or a card with `onTap`: Kino's selected look; `ui` `set` and `toggle` (`prop: \"selected\"`) change it"],
+  ["badge", "`\"dot\"` or `{ text, textEn?, color? }`", "none", `a button, a card with \`onTap\`, a tab: a count (at most ${S.sharedProps.badge.maxChars} characters) or a dot on its top end corner`],
 ];
 
 const STYLE_VALUES = {
   padding: `${S.spacingScale.join(", ")}, or per side \`{ x, y, top, end, bottom, start }\``,
   margin: `${S.spacingScale.join(", ")}, or per side`,
   gap: S.spacingScale.join(", "),
-  radius: codes(S.radiusTokens),
+  radius: `${codes(S.radiusTokens)}, or per corner \`{ ${S.corners.keys.join(", ")} }\` (an omitted one \`${S.corners.default}\`)`,
   w: S.sizeScale.join(", "), h: S.sizeScale.join(", "), minH: S.sizeScale.join(", "),
   fill: "`true`: the parent's whole width",
   weight: `1 to ${L.maxWeight}: its share of a \`Row\` or \`Column\``,
@@ -350,16 +357,17 @@ const STYLE_VALUES = {
   color: codes(S.colorRoles),
   span: `1 to ${L.gridColumns} or \`"auto"\` (default), only in a \`Row\` with \`wrap: true\``,
   offset: `0 to ${L.gridColumns - 1}, only in a \`Row\` with \`wrap: true\``,
+  maxWidthFraction: `${S.maxWidthFraction.min} to ${S.maxWidthFraction.max} in steps of ${S.maxWidthFraction.step}: at most that share of the parent's width (exactly, with \`fill\`)`,
 };
 
 const UI_OP_TEXT = {
   show: ["`{ show: key }`", "shows a hidden node"],
   hide: ["`{ hide: key }`", "hides it (kept in `state.ui.hidden`)"],
-  toggle: ["`{ toggle: key }`", "shows or hides it"],
+  toggle: ["`{ toggle: key, prop? }`", "shows or hides it; with `prop: \"selected\"`, flips a button's or a tappable card's `selected`"],
   enable: ["`{ enable: key }`", "turns it on"],
   disable: ["`{ disable: key }`", "draws it off (kept in `state.ui.enabled`)"],
   focus: ["`{ focus: key }`", "moves the focus there"],
-  set: ["`{ set: { key, value } }`", `gives an input a value: a string (at most ${n(L.maxTextChars)} characters), a boolean, a number, or up to ${L.maxListItems} strings for \`Chips\`; no event fires`],
+  set: ["`{ set: { key, value } }`", `gives an input a value: a string (at most ${n(L.maxTextChars)} characters), a boolean, a number, or up to ${L.maxListItems} strings for \`Chips\`; on a button or a tappable card, \`true\` or \`false\` is its \`selected\`; no event fires`],
   clear: ["`{ clear: key }`", "empties an input"],
   open: ["`{ open: key }`", "opens a declared pop-up (replacing an open one)"],
   close: ["`{ close: key }`", "closes it when it is the one open"],
@@ -479,7 +487,7 @@ export const UI_TABLES = {
   tokens: () => table(["Token", "Values"], [
     ["Spacing (`padding`, `margin`, `gap`)", S.spacingScale.join(", ")],
     ["Sizes (`width`, `height`, `minHeight`)", S.sizeScale.join(", ")],
-    ["Corners (`borderRadius`)", codes(S.radiusTokens)],
+    ["Corners (`borderRadius`)", `${codes(S.radiusTokens)} (one for every corner, or a map per corner)`],
     ["Colour roles (`color`)", codes(S.colorRoles)],
     ["Roles (`MaterialBanner`, a toast)", codes(S.roles)],
     ["Text styles (`Text.style`)", codes(TEXT_STYLES)],
@@ -505,7 +513,7 @@ export const UI_TABLES = {
   ]),
   panel: () => table(["What", "In a panel in screen mode"], [
     ["Result", `\`{ format: "${P.format}", root, ${P.resultFields.join(", ")} }\` (apiVersion ${P.apiVersion})`],
-    ["Tree", `depth ${P.maxDepth}, ${P.maxNodes} nodes; ${P.notDrawn.map((w) => code(namesOf(w)[0])).join(", ")} not drawn; no \`every\` (the panel's \`refreshMs\` is the periodic call)`],
+    ["Tree", `depth ${P.maxDepth}, ${P.maxNodes} nodes; ${P.notDrawn.map((w) => namesOf(w).map(code).join(", ")).join(", ")} not drawn${P.drawnWhenAnchored.length ? ", unless it has an `anchor` (a popover inside the drawer)" : ""}; no \`every\` (the panel's \`refreshMs\` is the periodic call)`],
     ["Context adds", codes(P.contextAdds) + `, and \`features\` holds \`"${P.contextFeature}"\` while screens are on`],
     ["`panelAction` triggers", codes(P.triggers)],
     ["Answer fields kept", codes(P.answerFields)],

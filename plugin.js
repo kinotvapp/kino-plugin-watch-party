@@ -816,7 +816,7 @@ export function newParty(name = "") {
     outbox: [], jobs: [], sent: [], replies: {}, chatTimes: {}, myChat: [], cursors: { joined: 0, hosted: 0, probe: 0 }, hereAt: 0,
     st: null, stAt: 0, skew: [], follow: true, hold: false, lastAction: 0, expect: null, seeks: [], lead: 0, seekPending: null, stuck: false,
     snapSeq: 0, snapAt: 0, lastSnapSent: 0, lastStateSent: 0, snapDue: false, forceState: null,
-    banner: null, lastOkAt: 0, doorUp: false, hostFailed: false, hostFailedAt: 0, awaiting: null, gone: [], probe: null, moved: null, aloneSince: 0,
+    banner: null, lastOkAt: 0, doorUp: false, chatSeen: 0, hostFailed: false, hostFailedAt: 0, awaiting: null, gone: [], probe: null, moved: null, aloneSince: 0,
     realLeftAt: 0, lobby: {}, lobbyHello: {}, lobbySent: {}, lobbySentAt: [], recovering: false, askedMid: null,
     oldView: null, link: null, pending: null, pairs: {}, closeJoined: null, closeHosted: false, expiresAtMs: 0, redirect: null,
     correctedAt: 0, correctedTo: null, notes: [], short: null, shortUntil: 0, shortError: false, shortMine: false,
@@ -1820,7 +1820,7 @@ function errorNodes(ctx, withRetry = true) {
   if (!e || typeof e.es !== "string") return [];
   const out = [Text(both(e.es, typeof e.en === "string" ? e.en : e.es), { key: "errText", color: "error" })];
   if (withRetry && typeof e.retry === "string" && BUSY[e.retry]) {
-    out.push(Btn("ElevatedButton", tx("retry"), { ui: [{ show: waitKey("retry") }], event: e.retry }, { key: "btnRetry" }));
+    out.push(Btn("ElevatedButton", tx("retry"), { ui: [{ show: waitKey("retry") }], event: e.retry }, { key: "btnRetry", autofocus: true }));
   }
   return out;
 }
@@ -1906,22 +1906,30 @@ function isMine(p, e) {
 }
 
 /** One message's bubble: mine filled with the primary colour, the others' a filled (neutral) card; a reaction is a glyph. */
+/**
+ * One message's bubble, at most three quarters of the list's width and as wide as its text: mine in the primary container
+ * colour, the others' in the neutral surface variant (the text inside takes the matching colour), with a smaller corner on
+ * the sender's side at the bottom (the tail). A reaction is the glyph alone, clearly large (h2; h3 on a TV).
+ */
 function bubble(e, mine, tv) {
-  // A reaction: the glyph alone, clearly large (h2; a step smaller on a TV, where every style grows by 1.25).
   if (e.k === "emoji") return Text(both(e.x, e.x), { style: tv ? "h3" : "h2" });
   return {
-    type: "Card", borderRadius: "large", padding: { x: 12, y: 8 },
-    ...(mine ? { color: "primary" } : { variant: "filled" }),
+    type: "Card", padding: { x: 12, y: 8 }, maxWidthFraction: 0.75,
+    color: mine ? "primaryContainer" : "surfaceVariant",
+    borderRadius: { topStart: "large", topEnd: "large", bottomStart: mine ? "large" : "small", bottomEnd: mine ? "small" : "large" },
     children: [Text(both(e.x, e.x))],
   };
 }
 
+/** When a chat entry was sent, on this device's clock (the host stamps it; a guest adds its measured offset). */
+const localAt = (p, e) => e.at + (p.role === "guest" ? skewOf(p.skew || []) : 0);
+
 /**
  * The messages as a chat: one item per run of consecutive entries from the same person. Mine sit on the right (the group
- * aligned to the end, an empty gutter on the left), the others' on the left with the name once above the run. The gutter
- * (padding + margin, 80 dp on the start or end side) keeps a bubble under about three quarters of the panel; a bubble is as
- * wide as its text. The newest at the bottom; then this device's messages still on their way, and the recent room notes as
- * small centred lines.
+ * aligned to the end), the others' on the left with the name and when the run started once above it («Bea · hace 2 min»,
+ * written by Kino); the newest run of mine ends with its time. The newest at the bottom, the list sticking there (Kino's
+ * «↓ Nuevos» when the person reads older lines); then this device's messages still on their way, and the recent room notes
+ * as small centred lines.
  */
 function chatList(p, now, ctx) {
   const entries = p.hist.slice(-(isTv(ctx) ? LIMITS.shownTv : LIMITS.shown));
@@ -1931,14 +1939,14 @@ function chatList(p, now, ctx) {
     if (last && last.by === e.by) last.entries.push(e);
     else groups.push({ by: e.by, mine: isMine(p, e), entries: [e] });
   }
-  const side = (mine) => mine
-    ? { crossAxisAlignment: "end", padding: { start: 48 }, margin: { start: 32 } }
-    : { crossAxisAlignment: "start", padding: { end: 48 }, margin: { end: 32 } };
-  const items = groups.map((g) => ({
+  const side = (mine) => ({ crossAxisAlignment: mine ? "end" : "start" });
+  const caption = { style: "caption", color: "muted" };
+  const items = groups.map((g, gi) => ({
     type: "Column", key: "g" + g.entries[0].c, fill: true, gap: 4, ...side(g.mine),
     children: [
-      ...(g.mine ? [] : [Text(both(displayName(g.entries[0].n), displayName(g.entries[0].n, true)), { style: "caption", color: "muted" })]),
+      ...(g.mine ? [] : [{ type: "Text", text: `${displayName(g.entries[0].n)} · `, textEn: `${displayName(g.entries[0].n, true)} · `, time: localAt(p, g.entries[0]), ...caption }]),
       ...g.entries.map((e) => bubble(e, g.mine, isTv(ctx))),
+      ...(g.mine && gi === groups.length - 1 ? [{ type: "Text", time: localAt(p, g.entries.at(-1)), ...caption }] : []),
     ],
   }));
   const pending = pendingOwn(p, now);
@@ -1946,7 +1954,7 @@ function chatList(p, now, ctx) {
     items.push({
       type: "Column", key: "pending", fill: true, gap: 4, ...side(true),
       children: [
-        ...pending.map((m) => ({ type: "Card", variant: "outlined", borderRadius: "large", padding: { x: 12, y: 8 }, children: [Text(both(m.x, m.x))] })),
+        ...pending.map((m) => ({ type: "Card", variant: "outlined", borderRadius: "large", padding: { x: 12, y: 8 }, maxWidthFraction: 0.75, children: [Text(both(m.x, m.x))] })),
         Text(both("Enviando…", "Sending…"), { style: "caption", color: "muted" }),
       ],
     });
@@ -1954,7 +1962,7 @@ function chatList(p, now, ctx) {
   p.notes.filter((n) => now - n.at < 20000).slice(-2).forEach((n, i) => {
     items.push(Text(both(n.es, n.en), { key: "note" + i, style: "caption", color: "muted", fill: true, crossAxisAlignment: "center" }));
   });
-  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
+  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, newItemsHint: true, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
 }
 
 /**
@@ -1968,19 +1976,20 @@ function chatTab(p, now, ctx) {
   if (p.stuck) children.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
   else if (p.correctedTo !== null && now - p.correctedAt < 8000) children.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
   children.push(chatList(p, now, ctx));
-  // The reactions: shown directly for a TV's display seat (all it can send), else hidden behind the emoji toggle (a `ui`
-  // toggle, no round trip); one sent closes them and the answer puts the D-pad back on the input. One compact block of two
-  // lines of four, under the list (which keeps the room left), never pushing it off screen.
-  children.push({
-    type: "Row", key: "emojiPalette", wrap: true, gap: 4, ...(display ? {} : { hidden: true }),
-    // Each reaction a pressable card around a large glyph (h3; h4 on a TV, where styles grow by 1.25), at least 48 dp tall. The
-    // reaction's index travels in the action itself: with an action object Kino reads `arg` from the object, never the node's.
+  // The reactions: each a pressable card around a large glyph (h3; h4 on a TV), at least 48 dp tall, two lines of four. The
+  // index travels in the action itself (with an action object Kino reads `arg` from it, never from the node). A TV's display
+  // seat (no input, reactions are all it sends) shows them in place; everyone else gets them as a popover over the input row,
+  // anchored to the emoji toggle: it takes no room from the list, and a reaction sent closes it (Back or a tap outside too).
+  const glyphs = (close) => ({
+    type: "Row", wrap: true, gap: 4,
     children: EMOJIS.map((e, i) => ({
       type: "Card", key: "emoji" + i, variant: "outlined", span: 3, minHeight: 48, padding: 4, crossAxisAlignment: "center",
-      onTap: display ? { event: "emoji", arg: String(i) } : { ui: [{ hide: "emojiPalette" }], event: "emoji", arg: String(i) },
+      onTap: close ? { ui: [{ close: "emojiPalette" }], event: "emoji", arg: String(i) } : { event: "emoji", arg: String(i) },
       children: [Text(both(e, e), { style: isTv(ctx) ? "h4" : "h3" })],
     })),
   });
+  if (display) children.push({ ...glyphs(false), key: "emojiPalette" });
+  else children.push({ type: "BottomSheet", key: "emojiPalette", anchor: "emojiToggle", children: [glyphs(true)] });
   if (!display) {
     // The field sends on the keyboard's own action (onSubmitted) and on its own send icon inside the field (onTrailingTap; its
     // label is for screen readers); beside it, the emoji toggle, icon-only. On a TV the send icon is its own D-pad stop:
@@ -1992,7 +2001,7 @@ function chatTab(p, now, ctx) {
           type: "TextField", key: "chatText", labelText: T.message[0], labelTextEn: T.message[1], maxLength: LIMITS.textChars, onSubmitted: "send", flex: 1,
           trailingIcon: "send", trailingLabel: "Enviar", trailingLabelEn: "Send", onTrailingTap: "send",
         },
-        { type: "IconButton", key: "emojiToggle", icon: "mood", labelText: "Emojis", labelTextEn: "Emoji", onPressed: { ui: [{ toggle: "emojiPalette" }] } },
+        { type: "IconButton", key: "emojiToggle", icon: "mood", labelText: "Emojis", labelTextEn: "Emoji", onPressed: { ui: [{ open: "emojiPalette" }] } },
       ],
     });
   } else if (p.link && !p.link.used) {
@@ -2180,6 +2189,12 @@ export function wizFocus(step) {
 
 
 
+/** The room view's tab this context asks for: Kino's tab choice, else the one the plugin state remembers; the chat by default. */
+function tabOf(ctx) {
+  const asked = ctx.tab === "room" || ctx.tab === "chat" ? ctx.tab : isObj(ctx.state) ? ctx.state.tab : null;
+  return asked === "room" ? "room" : "chat";
+}
+
 /** The tab's result (screen format), or the legacy panel when Kino's plugin screens are off. */
 export function view(p, ctx, now, player = null) {
   const features = Array.isArray(ctx.features) ? ctx.features : [];
@@ -2220,8 +2235,9 @@ export function view(p, ctx, now, player = null) {
       root: { type: "Column", gap: 8, padding: 8, children: [...top, ...recoveryNodes(p, now)] },
     });
   }
-  const asked = ctx.tab === "room" || ctx.tab === "chat" ? ctx.tab : isObj(ctx.state) ? ctx.state.tab : null;
-  const tab = asked === "room" ? "room" : "chat";
+  const tab = tabOf(ctx);
+  // Messages from the others since the Chat tab last showed: a count on that tab while the Sala tab is open.
+  const unread = tab === "room" ? p.hist.filter((e) => e.c > (p.chatSeen || 0) && !isMine(p, e)).length : 0;
   const head = [headerRow(p, ctx)];
   const pb = partyBanner(p, now);
   if (pb) head.push(pb);
@@ -2230,7 +2246,10 @@ export function view(p, ctx, now, player = null) {
   if (mb) head.push(mb);
   return done({
     ...base,
-    tabs: [{ id: "chat", label: T.chatTab[0], labelEn: T.chatTab[1] }, { id: "room", label: T.roomTab[0], labelEn: T.roomTab[1] }],
+    tabs: [
+      { id: "chat", label: T.chatTab[0], labelEn: T.chatTab[1], ...(unread ? { badge: { text: unread > 99 ? "99+" : String(unread) } } : {}) },
+      { id: "room", label: T.roomTab[0], labelEn: T.roomTab[1] },
+    ],
     tab,
     // The chat fills the panel: the messages take the room left and the input row stays at the bottom (above the keyboard).
     // The Sala tab scrolls as usual.
@@ -2270,7 +2289,7 @@ function recoveryNodes(p, now) {
   const leaves = Boolean(b && b.action && b.action.onTap === "leave");
   if (b) {
     out.push(Text(both(b.text, b.textEn), { style: "p" }));
-    if (b.action) out.push(Btn("ElevatedButton", both(b.action.label, b.action.labelEn), b.action.onTap, { key: "btnRecover", ...(leaves ? leave : {}) }));
+    if (b.action) out.push(Btn("ElevatedButton", both(b.action.label, b.action.labelEn), b.action.onTap, { key: "btnRecover", autofocus: true, ...(leaves ? leave : {}) }));
   }
   if (!leaves) out.push(Btn("TextButton", tx("leave"), "leave", { key: "btnLeave", ...leave }));
   return out;
@@ -2330,6 +2349,7 @@ export async function panelAt(ctx, now) {
   if (p.phase === "party" || p.link) {
     try { await pump(k.room, p, ctx, now); } catch (e) { /* a room hiccup never breaks the tab */ }
   }
+  if (p.phase === "party" && tabOf(ctx) === "chat") p.chatSeen = histMax(p); // what the Chat tab shows now is read
   const player = correction(p, ctx, now);
   saveParty(k.storage, p, now, logOf(k));
   return view(p, ctx, now, player);

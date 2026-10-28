@@ -101,12 +101,15 @@ aunque la app de chat la haya cambiado: negritas, emojis, saltos de línea o nú
 
 ## El chat
 
-- Los mensajes llenan el panel, el más nuevo abajo, y el campo de texto queda abajo (sobre el teclado): los tuyos a la derecha, los de los demás a la izquierda con su nombre
-  una vez sobre cada tanda. Una reacción se ve como un emoji más grande, y los avisos de la sala («Bea entró») como líneas
-  pequeñas centradas.
+- Los mensajes llenan el panel, el más nuevo abajo, y el campo de texto queda abajo (sobre el teclado). Los tuyos van a la
+  derecha y los de los demás a la izquierda, con el nombre y la hora una vez sobre cada tanda («Bea · hace 2 min»). Una
+  reacción se ve como un emoji más grande, y los avisos de la sala («Bea entró») como líneas pequeñas centradas. ¿Subiste
+  a leer mensajes viejos? Un aviso «↓ Nuevos» te devuelve abajo.
+- En la pestaña **Sala**, la pestaña **Chat** muestra cuántos mensajes nuevos llegaron.
 - Envía con el **ícono de enviar dentro del campo de texto** o con el botón de enviar de tu teclado.
-- Las ocho reacciones están escondidas detrás del **botón de emojis** junto al campo. Tócalo para verlas; al elegir una se
-  envía y se vuelven a esconder.
+- Las ocho reacciones se abren en un pequeño globo desde el **botón de emojis** junto al campo, sobre la fila de escritura,
+  sin quitarle espacio a los mensajes; al elegir una se envía y el globo se cierra (Atrás o un toque afuera también lo
+  cierran).
 - Como mucho 5 mensajes cada 10 segundos por persona.
 
 ## En la TV

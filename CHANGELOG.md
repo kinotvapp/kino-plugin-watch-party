@@ -24,6 +24,12 @@
   - creating or joining opens the chat on its input;
   - sending and reacting bring it back there;
   - errors focus **Try again**, and recovery screens focus their main button.
+- **A chat that looks like one:**
+  - softer bubbles with a tail;
+  - when each person's messages were sent ("Bea · 2 min ago");
+  - the reactions open as a small pop-up over the input instead of taking room from the messages;
+  - a "↓ New" hint when you scroll up;
+  - a count of new messages on the Chat tab while you are on the Room tab.
 - **The chat fills the panel:** the messages take the room and the input stays at the bottom, above the keyboard; the
   list opens at the newest message and follows new ones.
 - **Live channels:** the tab also appears on an En vivo channel. The room shares the host's channel, and a guest on

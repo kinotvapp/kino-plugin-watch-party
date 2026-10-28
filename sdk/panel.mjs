@@ -262,9 +262,42 @@ export function panelTabsOf(arr, lang, log) {
     if (label === "") { log(`panel: tab ${id} has no label`); continue; }
     if (seen.has(id)) { log(`panel: duplicate tab ${id} dropped`); continue; }
     seen.add(id);
-    out.push({ id, label });
+    // Task 15: a tab's badge (the shared `badge`), beside its label.
+    const badge = t.badge !== undefined && t.badge !== null ? badgeOf(t.badge, lang, `panel: tab ${id}`, log) : null;
+    out.push({ id, label, badge });
   }
   return out;
+}
+
+/** A plugin value as the app's log lines show it (PluginScreenOutput.fmt): a string quoted and cut to 40, anything else cut to 40. */
+function fmtValue(v) {
+  if (typeof v === "string") return `"${v.slice(0, 40)}"`;
+  if (v === undefined || v === null) return "null";
+  const t = typeof v === "number" ? (Number.isInteger(v) ? String(v) : javaDouble(v)) : typeof v === "object" ? JSON.stringify(v).replace(/\//g, "\\/") : String(v);
+  return t.slice(0, 40);
+}
+
+const SCREEN_SHARED = contract.manifest.screen.sharedProps;
+
+/**
+ * PluginScreenOutput.badgeOf (Task 15): the shared `badge`, the Badge node's shape: `"dot"` or `{ text, textEn?, color? }`. A
+ * text over sharedProps.badge.maxChars is cut, a colour that is no role takes the default (both logged under [where]);
+ * anything else is dropped, logged (null). `{ text: null }` is a dot.
+ */
+export function badgeOf(raw, lang, where, log) {
+  const B = SCREEN_SHARED.badge;
+  if (raw === B.dot) return { text: null, color: null };
+  const text = isObj(raw) ? localized(raw, "text", lang).trim() : "";
+  if (!isObj(raw) || text === "") { log(`${where} badge ${fmtValue(raw)} is not "dot" or { text, textEn?, color? }, dropped`); return null; }
+  let cut = text;
+  if (text.length > B.maxChars) { cut = text.slice(0, B.maxChars); log(`${where} badge text is over ${B.maxChars} characters, cut`); }
+  let color = null;
+  const c = raw.color;
+  if (c !== undefined && c !== null) {
+    if (typeof c === "string" && contract.manifest.screen.colorRoles.includes(c)) color = c;
+    else log(`${where} badge color ${fmtValue(c)} is not a color role, the default used`);
+  }
+  return { text: cut, color };
 }
 
 /** One leaf of a panel, or null (logged). [keys] are the keys already placed. */

@@ -1863,13 +1863,13 @@ test("room view: no «Fiesta» or room-name heading; a header row (status left, 
         assert.deepEqual([sync.type, sync.icon, sync.labelText, sync.labelTextEn], ["IconButton", "sync", "Sincronizar", "Sync"]);
         assert.equal(kids[kids.indexOf(header) + 1].key, "busy.sync", "its progress row right under the header");
       } else assert.equal(sync, undefined, "the host has nothing to sync to");
-      // Order: messages, then the (hidden) reactions, then the input row with the field, the emoji toggle and the send arrow.
+      // Order: messages, then the reactions' popover (it takes no room), then the input row: the field and the emoji toggle.
       const keys = kids.map((n) => n.key);
       const list = keys.indexOf("chat");
       const palette = keys.indexOf("emojiPalette");
       const input = keys.indexOf("inputRow");
       assert.ok(list > keys.indexOf("headerRow") && list < palette && palette < input, keys.join(","));
-      assert.equal(kids[palette].hidden, true, "reactions hidden until the emoji button");
+      assert.deepEqual([kids[palette].type, kids[palette].anchor], ["BottomSheet", "emojiToggle"], "a popover anchored to the emoji button");
       const row = kids[input];
       assert.deepEqual(row.children.map((n) => n.key), ["chatText", "emojiToggle"], "the field (its send icon inside it) and the emoji toggle");
       assert.equal(row.gap, device === "tv" ? 4 : 0);
@@ -1878,8 +1878,8 @@ test("room view: no «Fiesta» or room-name heading; a header row (status left, 
       assert.deepEqual([field.trailingIcon, field.trailingLabel, field.trailingLabelEn, field.onTrailingTap], ["send", "Enviar", "Send", "send"], "the send icon inside the field");
       const toggle = row.children[1];
       assert.deepEqual([toggle.type, toggle.icon, toggle.labelText, toggle.labelTextEn], ["IconButton", "mood", "Emojis", "Emoji"], "icon-only (the label is for screen readers)");
-      assert.deepEqual(row.children[1].onPressed, { ui: [{ toggle: "emojiPalette" }] });
-      assert.deepEqual(kids[palette].children[0].onTap, { ui: [{ hide: "emojiPalette" }], event: "emoji", arg: "0" }, "one reaction sent closes them");
+      assert.deepEqual(row.children[1].onPressed, { ui: [{ open: "emojiPalette" }] });
+      assert.deepEqual(kids[palette].children[0].children[0].onTap, { ui: [{ close: "emojiPalette" }], event: "emoji", arg: "0" }, "one reaction sent closes them");
       assert.deepEqual(bubblesOf(kids[list]).at(-1), { mine: d === bea, text: "hola" }, "the newest at the bottom");
       // As Kino reads it: the icon buttons keep their label as the accessible name and draw no text.
       const { panel: shown } = await panel(d, t);
@@ -1947,14 +1947,17 @@ test("the chat looks like a chat: mine on the right in primary, the others on th
     const items = rawChat(raw).items.filter((n) => n.type === "Column");
     assert.equal(items.length, 3, "three runs: Bea twice, Ana, Caro");
     const [mine, ana, caroRun] = items;
-    // Mine: right-aligned, an 80 dp gutter on the left, no name, primary bubbles.
-    assert.deepEqual([mine.crossAxisAlignment, mine.fill, mine.padding, mine.margin], ["end", true, { start: 48 }, { start: 32 }]);
-    assert.deepEqual(mine.children.map((n) => [n.type, n.color, n.borderRadius, n.children[0].text]), [["Card", "primary", "large", "hola"], ["Card", "primary", "large", "¿empezamos?"]]);
-    // The others: left-aligned, the gutter on the right, the name once above the run, neutral bubbles.
-    assert.deepEqual([ana.crossAxisAlignment, ana.padding, ana.margin], ["start", { end: 48 }, { end: 32 }]);
-    assert.deepEqual(ana.children.map((n) => n.type === "Card" ? ["Card", n.variant, n.children[0].text] : [n.type, n.style, n.color, n.text]), [["Text", "caption", "muted", "Ana"], ["Card", "filled", "sí"]]);
+    // Mine: right-aligned, no name, bubbles in the primary container colour, at most 3/4 of the width, the tail bottom-end.
+    const tail = (mine) => ({ topStart: "large", topEnd: "large", bottomStart: mine ? "large" : "small", bottomEnd: mine ? "small" : "large" });
+    assert.deepEqual([mine.crossAxisAlignment, mine.fill, mine.padding, mine.margin], ["end", true, undefined, undefined]);
+    assert.deepEqual(mine.children.map((n) => [n.type, n.color, n.maxWidthFraction, n.borderRadius, n.children[0].text]), [["Card", "primaryContainer", 0.75, tail(true), "hola"], ["Card", "primaryContainer", 0.75, tail(true), "¿empezamos?"]]);
+    // The others: left-aligned, the name and when the run started once above it (Kino writes the time), neutral bubbles.
+    assert.equal(ana.crossAxisAlignment, "start");
+    const head = ana.children[0];
+    assert.deepEqual([head.type, head.style, head.color, head.text, head.textEn, typeof head.time], ["Text", "caption", "muted", "Ana · ", "Ana · ", "number"]);
+    assert.deepEqual([ana.children[1].type, ana.children[1].color, ana.children[1].borderRadius, ana.children[1].children[0].text], ["Card", "surfaceVariant", tail(false), "sí"]);
     // A reaction: a larger glyph, no bubble.
-    assert.deepEqual(caroRun.children.map((n) => [n.type, n.style || "", n.text]), [["Text", "caption", "Caro"], ["Text", device === "tv" ? "h3" : "h2", party(caro).hist.at(-1).x]]);
+    assert.deepEqual(caroRun.children.map((n) => [n.type, n.style || "", n.text]), [["Text", "caption", "Caro · "], ["Text", device === "tv" ? "h3" : "h2", party(caro).hist.at(-1).x]]);
     assert.deepEqual(checkPanelScreen(raw, "es").dropped.filter((l) => l !== COPY_DROP), []);
   }
   // A note (on the host: someone left) is a small centred muted line at the end of the list.
@@ -2050,31 +2053,28 @@ test("focus on recovery: from the chat input to «btnRecover» (a tick keeps the
   assert.equal(a.focus, "btnRecover", "the press that fails again keeps the D-pad on it");
 });
 
-test("the emoji palette on phone and TV: hidden until the toggle, the toggle shows and hides it, a reaction sends, hides it and focuses the input", async () => {
+test("the emoji palette on phone and TV: a popover anchored to the toggle, takes no room, a reaction sends, closes it and focuses the input", async () => {
   let { host, guests: [bea], t } = await room(["Bea"]);
   await say(host, "hola", t);
   t = await rounds([host, bea], t + 10, 2);
   for (const kind of ["phone", "tv"]) {
     bea.kind = kind;
-    const { raw } = await panel(bea, t);
+    const { raw, panel: shown } = await panel(bea, t);
     const kids = raw.root.children;
     const palette = kids.find((n) => n.key === "emojiPalette");
-    assert.equal(palette.hidden, true, `${kind}: hidden by default`);
-    assert.deepEqual([palette.wrap, palette.children.length, palette.children.every((b) => b.span === 3)], [true, 8, true], "one compact block: two lines of four");
-    assert.deepEqual(palette.children.map((b) => b.key), Array.from({ length: 8 }, (_, i) => "emoji" + i), "stable keys");
+    assert.deepEqual([palette.type, palette.anchor, palette.hidden], ["BottomSheet", "emojiToggle", undefined], `${kind}: a popover, closed until opened`);
+    const glyphs = palette.children[0];
+    assert.deepEqual([glyphs.wrap, glyphs.children.length, glyphs.children.every((b) => b.span === 3)], [true, 8, true], "two lines of four");
+    assert.deepEqual(glyphs.children.map((b) => b.key), Array.from({ length: 8 }, (_, i) => "emoji" + i), "stable keys");
     const toggle = all(raw.root).find((n) => n.key === "emojiToggle");
-    assert.deepEqual(toggle.onPressed, { ui: [{ toggle: "emojiPalette" }] }, "no round trip: Kino shows it, and hides it on the next press");
-    // The list keeps the room left (flex) and is the same with the palette shown: nothing pushed off.
-    const list = kids.find((n) => n.key === "chat");
-    assert.equal(list.flex, 1);
-    const shown = plain({ ...raw, root: { ...raw.root, children: kids.map((n) => n.key === "emojiPalette" ? { ...n, hidden: false } : n) } });
-    assert.equal(JSON.stringify(shown.root.children.find((n) => n.key === "chat")), JSON.stringify(list), "the list's nodes do not change");
-    assert.deepEqual(palette.children[2].onTap, { ui: [{ hide: "emojiPalette" }], event: "emoji", arg: "2" });
+    assert.deepEqual(toggle.onPressed, { ui: [{ open: "emojiPalette" }] }, "no round trip");
+    assert.equal(all(shown.root).find((n) => n.key === "emojiPalette").anchor, "emojiToggle", "Kino reads the anchor");
+    assert.equal(kids.find((n) => n.key === "chat").flex, 1, "the list keeps the room left: the popover takes none");
+    assert.deepEqual(glyphs.children[2].onTap, { ui: [{ close: "emojiPalette" }], event: "emoji", arg: "2" });
     const a = await press(bea, "emoji", t + 1, { arg: "2" });
     assert.equal(a.focus, "chatText", `${kind}: back on the input`);
     t = await rounds([host, bea], t + 20, 2);
     const after = (await panel(bea, t)).raw;
-    assert.equal(after.root.children.find((n) => n.key === "emojiPalette").hidden, true, "still hidden after a reaction");
     assert.equal(bubblesOf(rawChat(after)).at(-1).text, (await P()).EMOJIS[2], "the reaction is in the list");
   }
 });
@@ -2205,7 +2205,7 @@ test("regression (field report): a reaction pressed in the palette reaches the p
       // As Kino reads the press: the event and its arg come from the action object (a node's own `arg` is not used there).
       const tap = all(shown.root).find((n) => n.key === "emoji" + i).onTap;
       assert.deepEqual(plain(tap.event), { name: "emoji", arg: String(i) });
-      assert.deepEqual(plain(tap.ui), [{ hide: "emojiPalette" }]);
+      assert.deepEqual(plain(tap.ui), [{ close: "emojiPalette" }]);
       const a = await press(who, tap.event.name, t, { arg: tap.event.arg });
       assert.equal(a.focus, "chatText");
       t = await rounds([host, bea], t + 100, 2);
@@ -2244,4 +2244,42 @@ test("the chat fills the panel: layout fill on the Chat tab only, the list takes
       d.tab = undefined;
     }
   }
+});
+
+test("Task 15 adopted: unread count on the Chat tab while Sala shows, newItemsHint on the list, autofocus on the way on and on «Reintentar», times on this device's clock", async () => {
+  let { net, host, guests: [bea], t } = await room(["Bea"]);
+  // Bea reads the chat, then opens the Sala tab; Ana writes twice: a count of 2 on the Chat tab, cleared when it shows.
+  t = await rounds([host, bea], t, 1);
+  bea.tab = "room";
+  await say(host, "uno", t);
+  await say(host, "dos", t + 1);
+  t = await rounds([host, bea], t + 10, 2);
+  let { raw, panel: shown } = await panel(bea, t);
+  assert.deepEqual(plain(raw.tabs[0].badge), { text: "2" });
+  assert.equal(raw.tabs[1].badge, undefined);
+  assert.ok(shown.tabs[0].badge, "Kino reads it");
+  await say(bea, "mío", t);
+  t = await rounds([host, bea], t + 10, 2);
+  assert.deepEqual(plain((await panel(bea, t)).raw.tabs[0].badge), { text: "2" }, "my own messages never count");
+  bea.tab = undefined;
+  ({ raw } = await panel(bea, t));
+  assert.equal(raw.tabs[0].badge, undefined, "the Chat tab shows: nothing unread");
+  assert.equal(rawChat(raw).newItemsHint, true);
+  // The others' run starts with «Ana · » and its time; my newest run ends with its time; both on Bea's clock.
+  const items = rawChat(raw).items;
+  const anaRun = items.find((n) => n.crossAxisAlignment === "start");
+  const sent = hist(bea).find((e) => e.x === "uno");
+  assert.equal(anaRun.children[0].time, sent.at + Math.min(...party(bea).skew), "the host's stamp moved to this device's clock");
+  assert.equal(typeof items.filter((n) => n.crossAxisAlignment === "end").at(-1).children.at(-1).time, "number");
+  // A recovery screen's way on, and a failed press's «Reintentar», carry autofocus.
+  net.down.add(party(host).hostWords);
+  t = await rounds([bea], t, 5);
+  const rec = all((await panel(bea, t)).raw.root).find((n) => n.key === "btnRecover");
+  assert.equal(rec.autofocus, true);
+  const eva = await device(net, "eva");
+  eva.state = { wizStep: "j1" };
+  net.service.down = true;
+  const a = await press(eva, "lookupShort", T0, { values: { joinShortCode: "12345" } });
+  applyAnswer(eva, a);
+  assert.equal(all((await panel(eva, T0 + 1)).raw.root).find((n) => n.key === "btnRetry").autofocus, true);
 });

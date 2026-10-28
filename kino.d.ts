@@ -662,7 +662,7 @@ interface KinoPanel {
   /** Asks Kino to call `panel` again every so often: 2000 to 60000 ms (clamped). */
   refreshMs?: number;
   /** At most 6: `id` as a key, `label` up to 24 characters. */
-  tabs?: { id: string; label: string; labelEn?: string }[];
+  tabs?: { id: string; label: string; labelEn?: string; badge?: KinoScreenBadge }[];
   /** The tab shown; the first one when absent or unknown. */
   tab?: string;
   elements: KinoLayoutNode<KinoPanelElement>[];
@@ -914,12 +914,29 @@ type KinoScreenSpacing = 0 | 4 | 8 | 12 | 16 | 24 | 32 | 48;
 type KinoScreenSize = 16 | 24 | 32 | 40 | 48 | 64 | 80 | 96 | 120 | 160 | 200 | 240 | 320 | 400 | 480 | 560 | 640;
 /** Every side, or some of them (`x` = start and end, `y` = top and bottom; `start`/`end` follow the reading direction). */
 type KinoScreenEdges = KinoScreenSpacing | { x?: KinoScreenSpacing; y?: KinoScreenSpacing; top?: KinoScreenSpacing; end?: KinoScreenSpacing; bottom?: KinoScreenSpacing; start?: KinoScreenSpacing };
-/** Colors only by role, painted with Kino's palette (never a hex value). */
-type KinoScreenColorRole = "primary" | "secondary" | "surface" | "muted" | "warning" | "error" | "onPrimary";
+/**
+ * Colors only by role, painted with Kino's palette (never a hex value). Task 15: `primaryContainer` (the surface tinted with the
+ * primary; a manifest `theme` tints it as it tints `primary`) and `surfaceVariant` (Kino's raised surface): on a box they are
+ * its fill and its text and icons take the matching on-colour; on a `Text` or an `Icon` the colour, nudged to read.
+ */
+type KinoScreenColorRole = "primary" | "secondary" | "surface" | "muted" | "warning" | "error" | "onPrimary" | "primaryContainer" | "surfaceVariant";
+/** A radius token. */
+type KinoScreenRadius = "none" | "small" | "medium" | "large" | "full";
+/**
+ * Task 15: `borderRadius` per corner: each a token, an omitted corner `medium`; `start` and `end` follow the reading direction.
+ * Fills, clips, outlines and the TV's focus ring follow it.
+ */
+type KinoScreenCorners = { topStart?: KinoScreenRadius; topEnd?: KinoScreenRadius; bottomStart?: KinoScreenRadius; bottomEnd?: KinoScreenRadius };
+/**
+ * Task 15: the shared `badge` (the `Badge` node's value): `"dot"`, or a short count or word (at most 12 characters, cut beyond)
+ * with an optional colour role (Kino's primary by default). Drawn on the node's top end corner (beside a tab's label); a screen
+ * reader reads it after the node's name. Set it again on each render.
+ */
+type KinoScreenBadge = "dot" | { text: string; textEn?: string; color?: KinoScreenColorRole };
 /** The style every node takes; each property may be a per-size map. */
 interface KinoScreenStyle {
   padding?: KinoScreenResponsive<KinoScreenEdges>; margin?: KinoScreenResponsive<KinoScreenEdges>; gap?: KinoScreenResponsive<KinoScreenSpacing>;
-  borderRadius?: KinoScreenResponsive<"none" | "small" | "medium" | "large" | "full">;
+  borderRadius?: KinoScreenResponsive<KinoScreenRadius | KinoScreenCorners>;
   width?: KinoScreenResponsive<KinoScreenSize>; height?: KinoScreenResponsive<KinoScreenSize>; minHeight?: KinoScreenResponsive<KinoScreenSize>;
   /** Take the parent's whole width. */
   fill?: KinoScreenResponsive<boolean>;
@@ -943,6 +960,12 @@ interface KinoScreenStyle {
    * leaves (lowered, logged). Per size as `span`.
    */
   offset?: KinoScreenResponsive<number>;
+  /**
+   * Task 15: at most this share of the width the parent offers, 0.25 to 1 in steps of 0.05 (off the scale: dropped, logged);
+   * the node still wraps its content, so it is a maximum. With `fill: true` it takes exactly that share. Where it sits is the
+   * parent's `crossAxisAlignment` (a chat's bubbles: `0.75`, their column aligned `end` or `start`).
+   */
+  maxWidthFraction?: KinoScreenResponsive<number>;
 }
 
 /** The kind of a `go.title` / `go.play` ref: what this plugin's `home`/`search`/`browse` said it was. */
@@ -1089,7 +1112,13 @@ type KinoScreenOpen = { route?: string; args?: Record<string, unknown> };
  * at most 500 strings (chips).
  */
 type KinoScreenUiOp =
-  | { show: string } | { hide: string } | { toggle: string } | { enable: string } | { disable: string } | { focus: string }
+  | { show: string } | { hide: string } | { enable: string } | { disable: string } | { focus: string }
+  /**
+   * Shows or hides a node; Task 15: `prop: "selected"` flips the `selected` state of a button or a card with `onTap` instead
+   * (`"hidden"`, the default, is the same as none). Any other `prop` drops the operation, logged.
+   */
+  | { toggle: string; prop?: "hidden" | "selected" }
+  /** Task 15: on a button or a card with `onTap`, `value: true | false` sets its `selected` state (anything else is ignored, logged). */
   | { set: { key: string; value: string | boolean | number | string[] } }
   | { clear: string }
   /** Opens the `popup` node of that key (replacing any open pop-up); `close` closes it when it is the one open. */
@@ -1125,9 +1154,24 @@ interface KinoScreenBase extends KinoScreenStyle {
   arg?: string;
   /** Drawn only on these devices / width classes; an unknown name drops the node. */
   devices?: KinoScreenDevice[]; sizes?: KinoScreenSizeClass[];
+  /**
+   * Task 15, on a node that takes focus (a button, an input, a `TabBar`, a `titleCard`, or any node with `onTap` or
+   * `onLongPress`): on a render (a tick or an answer) that left focus nowhere or on a node that is gone, focus goes to the first
+   * `autofocus` node in tree order (the remote lands on the one way forward). An answer's own `focus` wins; a node that still
+   * holds focus keeps it; on a phone a text field is never autofocused (no keyboard opens). Elsewhere ignored, logged.
+   */
+  autofocus?: boolean;
+  /**
+   * Task 15, on a button or a card with `onTap`: Kino's selected look (filled-tonal; a card: an outline in the primary colour),
+   * read as selected. State, not an action: `ui` `set` (true or false) and `toggle` with `prop: "selected"` change it without a
+   * round trip until your next render says it again. `Chips` and `TabBar` say theirs with `value`.
+   */
+  selected?: boolean;
+  /** Task 15, on a button or a card with `onTap`: a count or a dot on the top end corner ([KinoScreenBadge]). */
+  badge?: KinoScreenBadge;
 }
-/** One choice of a `DropdownButton`, `RadioGroup`, `Chips` or `TabBar` (values distinct, at most 500). */
-interface KinoScreenOption { value: string; label: string; labelEn?: string }
+/** One choice of a `DropdownButton`, `RadioGroup`, `Chips` or `TabBar` (values distinct, at most 500); a tab also takes a `badge` (Task 15). */
+interface KinoScreenOption { value: string; label: string; labelEn?: string; badge?: KinoScreenBadge }
 /**
  * What every input takes; its value lives in the state under `inputs.<key>`. `bind`: the key of one of the plugin's own
  * settings: the field shows its stored value when the screen opens and writes the person's change back to it through Kino's
@@ -1184,7 +1228,13 @@ type KinoScreenNode =
   | (KinoScreenBase & { type: "GridView"; children?: KinoScreenNode[]; columns?: KinoScreenResponsive<number> })
   /** `SizedBox` is an empty box of its `width`/`height`; `Spacer` an empty one that takes its `flex` share. */
   | (KinoScreenBase & { type: "Spacer" | "SizedBox" | "Divider" })
-  | (KinoScreenBase & { type: "Text"; text: string; textEn?: string; style?: KinoScreenResponsive<"h1" | "h2" | "h3" | "h4" | "h5" | "p" | "caption" | "label">; maxLines?: KinoScreenResponsive<number>; bold?: KinoScreenResponsive<boolean> })
+  /**
+   * Task 15: `time` (epoch ms) is written by Kino in the app's language: `timeFormat: "relative"` (the default: «ahora»,
+   * «hace 2 min», «ayer», rewritten every minute while shown, never a call to you) or `"clock"` («18:42», the device's 12/24 h).
+   * With a `time`, `text` is optional and is its prefix («Actualizado hace 5 min»).
+   */
+  | (KinoScreenBase & { type: "Text"; text: string; textEn?: string; style?: KinoScreenResponsive<"h1" | "h2" | "h3" | "h4" | "h5" | "p" | "caption" | "label">; maxLines?: KinoScreenResponsive<number>; bold?: KinoScreenResponsive<boolean>; time?: number; timeFormat?: "relative" | "clock" })
+  | (KinoScreenBase & { type: "Text"; text?: string; textEn?: string; style?: KinoScreenResponsive<"h1" | "h2" | "h3" | "h4" | "h5" | "p" | "caption" | "label">; maxLines?: KinoScreenResponsive<number>; bold?: KinoScreenResponsive<boolean>; time: number; timeFormat?: "relative" | "clock" })
   /**
    * `fallback` (apiVersion 14): one node drawn in the image's box, at its size, when the picture fails to load or there is
    * no `url` (with a fallback, an image whose `url` is missing or not https on a public host is kept and draws it). It may
@@ -1202,7 +1252,13 @@ type KinoScreenNode =
        * scrolled up it stays put until they come back. One column, in a list that scrolls itself (a full screen, or a panel with
        * `layout: "fill"`); drawn flat it does nothing (logged once).
        */
-      stickToBottom?: KinoScreenResponsive<boolean> })
+      stickToBottom?: KinoScreenResponsive<boolean>;
+      /**
+       * Task 15: items appended while the person is not at the end show Kino's own chip («↓ Nuevos» / «↓ New», never your text)
+       * over the list's bottom; a tap goes to the end and it hides once the end shows. One column, a list that scrolls itself.
+       * On the TV it is a focus stop: Down from the list region reaches it before your controls under the list.
+       */
+      newItemsHint?: boolean })
   /**
    * A button: `ElevatedButton` (Kino's primary), `TextButton`, `IconButton` (needs `icon`), or `Button` with its `variant`
    * (`secondary` has no other name). `submit: true` inside a `Form`: Kino checks the form, then runs the form's `onSubmitted`
@@ -1241,12 +1297,16 @@ type KinoScreenNode =
    * A pop-up declared in the tree (`key` required), drawn only once a `{ open: key }` ui operation opens it. One pop-up at
    * a time; Back closes it first. An `AlertDialog` or `BottomSheet` takes `children` (an `AlertDialog` also `buttons`); a
    * `PopupMenuButton` takes 1..8 `items`. `popup` with its `kind` is the same thing.
+   * Task 15 `anchor` (a node's key): drawn next to that node (above it when there is more room above, else below), sized to
+   * its content, over the content and taking no layout space, with no close of its own (Back and a tap outside close it; on
+   * the TV focus goes in, stays there and Back gives it back to the anchor). With no room above or below, or the anchor not on
+   * screen, it falls back to its kind's own place (logged once). A screen-format panel draws a pop-up only with an `anchor`.
    */
-  | (KinoScreenBase & { type: "AlertDialog"; key: string; title?: string; titleEn?: string; children?: KinoScreenNode[]; buttons?: KinoScreenDialog["buttons"] })
-  | (KinoScreenBase & { type: "BottomSheet"; key: string; title?: string; titleEn?: string; children?: KinoScreenNode[] })
-  | (KinoScreenBase & { type: "PopupMenuButton"; key: string; title?: string; titleEn?: string; items: KinoScreenMenuItem[] })
-  | (KinoScreenBase & { type: "popup"; key: string; kind: "dialog" | "sheet"; title?: string; titleEn?: string; children?: KinoScreenNode[]; buttons?: KinoScreenDialog["buttons"]; onClose?: KinoScreenPopupClose })
-  | (KinoScreenBase & { type: "popup"; key: string; kind: "menu"; title?: string; titleEn?: string; items: KinoScreenMenuItem[]; onClose?: KinoScreenPopupClose })
+  | (KinoScreenBase & { type: "AlertDialog"; key: string; title?: string; titleEn?: string; children?: KinoScreenNode[]; buttons?: KinoScreenDialog["buttons"]; anchor?: string })
+  | (KinoScreenBase & { type: "BottomSheet"; key: string; title?: string; titleEn?: string; children?: KinoScreenNode[]; anchor?: string })
+  | (KinoScreenBase & { type: "PopupMenuButton"; key: string; title?: string; titleEn?: string; items: KinoScreenMenuItem[]; anchor?: string })
+  | (KinoScreenBase & { type: "popup"; key: string; kind: "dialog" | "sheet"; title?: string; titleEn?: string; children?: KinoScreenNode[]; buttons?: KinoScreenDialog["buttons"]; onClose?: KinoScreenPopupClose; anchor?: string })
+  | (KinoScreenBase & { type: "popup"; key: string; kind: "menu"; title?: string; titleEn?: string; items: KinoScreenMenuItem[]; onClose?: KinoScreenPopupClose; anchor?: string })
   /**
    * A form: its `children` drawn as a column; its fields (every input in it, a pop-up's body excepted) take the rules of
    * KinoScreenFieldRules. A `submit: true` button submits it: Kino checks every field first, and an invalid form never
@@ -1496,7 +1556,7 @@ interface KinoPanelScreenResult {
   /** Kino calls `panel` again every so often (2000..60000 ms), only while the panel is open: e.g. live scores. */
   refreshMs?: number;
   /** At most 6, as the legacy panel's; a tab press calls `panel` again with `context.tab`. */
-  tabs?: { id: string; label: string; labelEn?: string }[];
+  tabs?: { id: string; label: string; labelEn?: string; badge?: KinoScreenBadge }[];
   tab?: string;
   /** Task 8j: as `KinoPanel.player`: counts only with the `playerControl` capability. */
   player?: KinoPlayerAction;

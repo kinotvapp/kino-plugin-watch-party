@@ -98,11 +98,14 @@ the chat app did to it: bold, emoji, line breaks or full-width digits.
 
 ## The chat
 
-- The messages fill the panel, newest at the bottom, and the text field stays at the bottom (above the keyboard): yours on the right, the others' on the left with their name once
-  above each run. A reaction shows as a larger emoji, and room notes ("Bea joined") as small centred lines.
+- The messages fill the panel, newest at the bottom, and the text field stays at the bottom (above the keyboard). Yours
+  are on the right, the others' on the left, with the name and when they wrote once above each run ("Bea · 2 min ago"). A
+  reaction shows as a larger emoji, and room notes ("Bea joined") as small centred lines. Scrolled up to read older
+  messages? A "↓ New" hint brings you back.
+- On the **Room** tab, the **Chat** tab shows how many new messages arrived.
 - Send with the **send icon inside the text field**, or with your keyboard's own send button.
-- The eight reactions are hidden behind the **emoji button** next to the field. Press it to show them; picking one sends
-  it and hides them again.
+- The eight reactions open as a small pop-up from the **emoji button** next to the field, over the input, without taking
+  room from the messages; picking one sends it and closes the pop-up (Back or a tap outside closes it too).
 - At most 5 messages every 10 seconds per person.
 
 ## On a TV

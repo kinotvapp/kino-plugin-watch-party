@@ -6,7 +6,7 @@
 // does (the answer crosses to Kino as JSON), and like the Kotlin it walks a JSON object's keys SORTED wherever the walk
 // can log, so the lines come out in the same order. plugins/sdk/test/screen-cases.json is the case table both sides share.
 import { contract, isUserServer, javaDouble, screenGoOf, screenItems, titleByIdsOf, urlGoOf, copyGoOf, liveChannelGoOf } from "./contract.mjs";
-import { cappedLog, httpsImage, panelAccentOf, panelMessageOf, panelPlayerOf, panelRefreshOf, panelTabsOf } from "./panel.mjs";
+import { badgeOf, cappedLog, httpsImage, panelAccentOf, panelMessageOf, panelPlayerOf, panelRefreshOf, panelTabsOf } from "./panel.mjs";
 
 // ---------- limits and name tables (ScreenLimits, ScreenWidgets; numbers come from the contract file) ----------
 
@@ -489,7 +489,9 @@ class Reader {
     if (TABLE_PARTS.includes(type)) { this.log(`screen: ${type} outside a table, dropped`); return null; }
     if (!WIDGETS.includes(type)) { this.log(`screen: unknown widget "${type.slice(0, 40)}", dropped`); return null; }
     if (!this.widgets.has(type)) { this.log(`screen: widget "${type}" is not drawn by this Kino, dropped`); return null; }
-    if (this.inPanel && PANEL_SCREEN.notDrawn.includes(type)) { this.log(`screen: ${type} is not available in the player panel, dropped`); return null; }
+    // Task 15: an anchored pop-up is drawn in the panel after all (a popover inside the drawer).
+    const anchoredHere = (PANEL_SCREEN.drawnWhenAnchored ?? []).includes(type) && typeof opt(o, "anchor") === "string" && ID.test(o.anchor);
+    if (this.inPanel && PANEL_SCREEN.notDrawn.includes(type) && !anchoredHere) { this.log(`screen: ${type} is not available in the player panel, dropped`); return null; }
     const drop = (why) => { this.log(`screen: ${type} ${why}, dropped`); return null; };
     if (type === FORM && this.formKey !== null) return drop("inside a form (forms do not nest)");
     if (type === FORM && this.answerBody > 0) return drop("in an answer's pop-up");
@@ -553,11 +555,51 @@ class Reader {
     const t = opt(o, "testKey");
     const testKey = typeof t === "string" && t !== "" && t.length <= LIMITS.maxTestKeyChars ? t : null;
     if (testKey === null && present(o, "testKey")) this.log(`screen: ${type} testKey is not a string of 1 to ${LIMITS.maxTestKeyChars} characters, dropped`);
-    const common = (p, byClass) => ({ key, enabled, hidden, style: p.style, onTap: p.onTap, onLongPress: p.onLongPress, devices, sizes, testKey, byClass });
+    // Task 15: the properties a family of nodes shares (never per size: a map there was dropped above, logged).
+    const shared = this.sharedProps(o, type, passes[0][1], maps);
+    const common = (p, byClass) => ({ key, enabled, hidden, style: p.style, onTap: p.onTap, onLongPress: p.onLongPress, devices, sizes, testKey, byClass, ...shared });
     const byClass = {};
     if (maps !== null) for (const [cls, p] of passes) byClass[cls] = node(type, p.build(false, key), common(p, {}));
     const base = passes[0][1];
     return node(type, base.build(true, key), common(base, byClass));
+  }
+
+  /**
+   * PluginScreenOutput.sharedProps (Task 15): `autofocus` (a node that takes focus: sharedProps.focusableWidgets, or any node
+   * with an onTap or an onLongPress; never a QR), `selected` and `badge` (a button, a card with an onTap), read once from the
+   * node ([base] is its first pass: its actions). A value on a node that does not take it, or not of its shape, is ignored,
+   * logged. A per-size map on one of them was already dropped, logged ([maps]).
+   */
+  sharedProps(o, type, base, maps) {
+    const SH = S.sharedProps;
+    const given = (name) => present(o, name) && !(maps !== null && maps.has(name));
+    const pressable = type === "button" || (type === "card" && base.onTap !== null);
+    let autofocus = false;
+    if (given("autofocus")) {
+      const v = o.autofocus;
+      if (typeof v !== "boolean") this.log(`screen: ${type} autofocus ${fmt(v)} is not true or false, ignored`);
+      else {
+        const focusable = type !== "qr" && (SH.focusableWidgets.includes(type) || base.onTap !== null || base.onLongPress !== null);
+        if (v && !focusable) this.log(`screen: ${type} autofocus works only on a node that takes focus, ignored`);
+        else autofocus = v;
+      }
+    }
+    const onPressable = (name) => {
+      if (pressable) return true;
+      if (type === "chips" || type === "tabs") this.log(`screen: ${type} ${name} is not read: its value says which is picked, ignored`);
+      else if (type === "card") this.log(`screen: card ${name} needs an onTap, ignored`);
+      else this.log(`screen: ${type} ${name} works only on a button or a card with onTap, ignored`);
+      return false;
+    };
+    let selected = null;
+    if (given("selected")) {
+      const v = o.selected;
+      if (typeof v !== "boolean") this.log(`screen: ${type} selected ${fmt(v)} is not true or false, ignored`);
+      else if (onPressable("selected")) selected = v;
+    }
+    let badge = null;
+    if (given("badge") && onPressable("badge")) badge = badgeOf(o.badge, this.lang, `screen: ${type}`, this.log);
+    return { autofocus, selected, badge };
   }
 
   /** What one pass over a node's own fields read: the style, the actions and the widget's builder. */
@@ -686,8 +728,16 @@ class Reader {
       }
       case "grid": { const columns = this.int(o, type, "columns", 1, LIMITS.maxGridColumns, 2); return (k) => ({ children: kids(k), columns }); }
       case "text": {
+        // Task 15: a time Kino writes itself; with one, the text is only its prefix (it may be empty).
+        const TT = S.textTime;
+        let time = null;
+        if (present(o, TT.field)) {
+          const v = o[TT.field];
+          if (typeof v === "number" && Number.isFinite(v) && v === Math.floor(v) && v >= 0 && v <= TT.maxMs) time = v;
+          else this.log(`screen: text time ${fmt(v)} is not a time in ms since 1970, dropped`);
+        }
         const text = t("text");
-        if (text === "") return fail("is empty");
+        if (text === "" && time === null) return fail("is empty");
         const styleName = this.enumOf(o, type, "style", [...TEXT_STYLES, ...Object.keys(TEXT_STYLE_ALIASES)], "p", TEXT_STYLES);
         const variant = TEXT_STYLE_ALIASES[styleName] ?? styleName;
         const maxLines = has(o, "maxLines") ? this.intOrNull(o, type, "maxLines", 1, INT_MAX) : null;
@@ -696,7 +746,9 @@ class Reader {
           if (typeof o.bold === "boolean") bold = o.bold;
           else this.log(`screen: text bold ${fmt(o.bold)} is not true or false, ignored`);
         }
-        return () => ({ text, variant, maxLines, bold });
+        const timeFormat = this.enumOf(o, type, TT.formatField, TT.formats, TT.formats[0]);
+        if (time === null && present(o, TT.formatField)) this.log("screen: text timeFormat without a time, ignored");
+        return () => ({ text, variant, maxLines, bold, time, timeFormat });
       }
       case "image": {
         // With a fallback (Task 7i-1) an image with no url Kino may load is kept: it draws the fallback.
@@ -751,6 +803,8 @@ class Reader {
         const paging = this.paging(o, type);
         // Task 14: the list opens at its end and follows new items while the person is there.
         const stickToBottom = this.flag(o, type, "stickToBottom");
+        // Task 15: Kino's «↓ Nuevos» chip while new items wait below.
+        const newItemsHint = this.flag(o, type, S.listHints.field);
         return (k) => {
           const items = k ? this.flatWhile(false, () => this.children(o, depth, "items", LIMITS.maxListItems)) : [];
           let empty = null;
@@ -760,7 +814,7 @@ class Reader {
             else if (isObj(e)) empty = this.flatWhile(false, () => this.node(e, depth + 1));
             else this.log("screen: list empty is not a node, dropped");
           }
-          return { items, empty, columns, paging, stickToBottom };
+          return { items, empty, columns, paging, stickToBottom, newItemsHint };
         };
       }
       case "button": {
@@ -924,20 +978,27 @@ class Reader {
         if (typeof kind !== "string" || !S.popupKinds.includes(kind)) return fail(`kind ${fmt(kind)} is not ${S.popupKinds.join(", ")}`);
         const title = t("title");
         const onClose = this.popupOnClose(o);
+        // Task 15: the node it is drawn next to (a popover); a key Kino cannot read is ignored, logged.
+        let anchor = null;
+        const a = opt(o, S.declaredPopups.anchor.field);
+        if (!absent(a)) {
+          if (typeof a === "string" && ID.test(a)) anchor = a;
+          else this.log(`screen: popup anchor ${fmt(a)} is not a valid key, ignored`);
+        }
         // A field another kind takes is ignored, logged.
         const foreign = kind === "dialog" ? ["items"] : kind === "sheet" ? ["buttons", "items"] : ["buttons", "children"];
         for (const f of foreign) if (present(o, f)) this.log(`screen: popup ${kind} does not take ${f}, ignored`);
         if (kind === "menu") {
           const items = this.menuItems(opt(o, "items"), POPUP);
           if (items.length === 0) return fail(`needs 1 to ${LIMITS.maxMenuItems} valid items`);
-          return () => ({ kind, title, children: [], buttons: [], items, onClose });
+          return () => ({ kind, title, children: [], buttons: [], items, onClose, anchor });
         }
         // As an answer's: a dialog or sheet with neither a title nor a body is dropped.
         const children = opt(o, "children");
         if (title === "" && !(Array.isArray(children) && children.length > 0)) return fail("has neither a title nor a body");
         const buttons = kind === "dialog" ? this.buttons(opt(o, "buttons")) : [];
         // A pop-up's body is drawn over the canvas, outside any form around the pop-up.
-        return (k) => ({ kind, title, children: k ? this.flatWhile(false, () => this.inForm(null, () => this.children(o, depth))) : [], buttons, items: [], onClose });
+        return (k) => ({ kind, title, children: k ? this.flatWhile(false, () => this.inForm(null, () => this.children(o, depth))) : [], buttons, items: [], onClose, anchor });
       }
       case FORM: {
         const onSubmit = this.actions(opt(o, "onSubmit"), o, type, "onSubmit");
@@ -1464,7 +1525,13 @@ class Reader {
       if (value === null || value === "" || value.length > LIMITS.maxTextChars || label === "") { this.log(`screen: ${type} ${what} ${i} needs a value and a label, dropped`); continue; }
       if (seen.has(value)) { this.log(`screen: ${type} ${what} ${i} repeats value ${fmt(value)}, dropped`); continue; }
       seen.add(value);
-      out.push({ value, label });
+      // Task 15: a tab's badge, beside its label; any other choice takes none.
+      let badge = null;
+      if (present(e, "badge")) {
+        if (type === "tabs") badge = badgeOf(e.badge, this.lang, `screen: ${type} ${what} ${i}`, this.log);
+        else this.log(`screen: ${type} ${what} ${i} badge works only on a tab, ignored`);
+      }
+      out.push({ value, label, badge });
     }
     return out;
   }
@@ -1537,10 +1604,38 @@ class Reader {
     };
     const size = (name) => (present(o, name) ? scaled(o[name], name, S.sizeScale, "size") : null);
     const radius = () => {
-      if (!present(o, "radius")) return null;
+      if (!present(o, "radius") || isObj(o.radius)) return null;
       if (typeof o.radius === "string" && S.radiusTokens.includes(o.radius)) return o.radius;
       this.log(`screen: ${type} radius ${fmt(o.radius)} is not a radius token, dropped`);
       return null;
+    };
+    // Task 15: `borderRadius` per corner, `{ topStart, topEnd, bottomStart, bottomEnd }` (an omitted corner is the default).
+    const corners = () => {
+      if (!isObj(opt(o, "radius"))) return null;
+      const m = o.radius;
+      const C = S.corners;
+      for (const k of Object.keys(m).sort()) if (!C.keys.includes(k)) this.log(`screen: ${type} radius.${k.slice(0, 40)} is not a corner, ignored`);
+      const out = {};
+      for (const k of C.keys) {
+        if (!present(m, k)) { out[k] = C.default; continue; }
+        if (typeof m[k] === "string" && S.radiusTokens.includes(m[k])) { out[k] = m[k]; continue; }
+        this.log(`screen: ${type} radius.${k} ${fmt(m[k])} is not a radius token, dropped`);
+        return null;
+      }
+      return out;
+    };
+    // Task 15: a share of the parent's width, min to max in steps.
+    const fraction = () => {
+      if (!present(o, "maxWidthFraction")) return null;
+      const F = S.maxWidthFraction;
+      const v = o.maxWidthFraction;
+      const d = typeof v === "number" && Number.isFinite(v) ? v : null;
+      const steps = d === null ? 0 : (d - F.min) / F.step;
+      if (d === null || d < F.min - 1e-9 || d > F.max + 1e-9 || Math.abs(steps - Math.round(steps)) > 1e-6) {
+        this.log(`screen: ${type} maxWidthFraction ${fmt(v)} is not 0.25 to 1 in steps of 0.05, dropped`);
+        return null;
+      }
+      return Math.round(d * 100) / 100;
     };
     const color = () => {
       if (!present(o, "color")) return null;
@@ -1566,6 +1661,7 @@ class Reader {
       margin: edges("margin"),
       gap: present(o, "gap") ? scaled(o.gap, "gap", S.spacingScale, "spacing") : null,
       radius: radius(),
+      corners: corners(),
       w: size("w"),
       h: size("h"),
       minH: size("minH"),
@@ -1597,7 +1693,7 @@ class Reader {
       this.log(`screen: ${type} offset ${offset} and span ${span} pass ${cols} columns, the offset lowered to ${cols - span}`);
       offset = cols - span;
     }
-    return { ...base, span, offset };
+    return { ...base, span, offset, maxWidthFraction: fraction() };
   }
 
   // ---- actions ----
@@ -1698,7 +1794,8 @@ class Reader {
   uiOp(raw, where) {
     const o = isObj(raw) ? raw : null;
     const names = o ? Object.keys(o) : [];
-    const op = names.length === 1 ? names[0] : null;
+    // Task 15: `toggle` alone takes a second field, `prop` (what it flips).
+    const op = names.length === 2 && names.includes("toggle") && names.includes("prop") ? "toggle" : names.length === 1 ? names[0] : null;
     if (o === null || op === null || !S.uiOps.includes(op)) {
       const name = o ? names.sort()[0] : undefined;
       this.log(`${where} ui operation ${fmt(name ?? raw)} is unknown, dropped`);
@@ -1734,7 +1831,13 @@ class Reader {
       return { set: { key: k, value } };
     }
     const k = key(o[op]);
-    return k === null ? null : { [op]: k };
+    if (k === null) return null;
+    if (op === "toggle" && !absent(o.prop)) {
+      const props = S.sharedProps.toggleProps;
+      if (typeof o.prop !== "string" || !props.includes(o.prop)) { this.log(`${where} ui.toggle prop ${fmt(o.prop)} is not ${props.join(" or ")}, dropped`); return null; }
+      return o.prop === props[0] ? { toggle: k } : { toggle: k, prop: o.prop };
+    }
+    return { [op]: k };
   }
 
   /** Exactly one of the twelve go shapes, logged under [where] when it is not. */
@@ -2321,7 +2424,7 @@ export function printScreenTree(n) {
     if (v === null || v === undefined) return undefined;
     if (k === "enabled" && v === true) return undefined;
     if (k === "hidden" && v === false) return undefined;
-    if ((k === "fill" || k === "close" || k === "pop" || k === "withheld") && v === false) return undefined;
+    if ((k === "fill" || k === "close" || k === "pop" || k === "withheld" || k === "autofocus" || k === "newItemsHint") && v === false) return undefined;
     if (k === "byClass" && isObj(v) && Object.keys(v).length === 0) return undefined;
     if (k === "field" && isObj(v) && Object.values(v).every((x) => x === null || x === false)) return undefined;
     if (k === "style" && isObj(v) && Object.values(v).every((x) => x === null || x === false)) return undefined;
