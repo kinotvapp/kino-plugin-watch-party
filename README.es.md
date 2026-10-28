@@ -54,8 +54,11 @@ mismo plugin quiere decir el mismo corte y el mismo archivo, así las posiciones
 
 - otro título: la pestaña ofrece **Abrir este título**, la página de Kino de ese título, donde eliges tu fuente;
 - otro plugin: la pestaña dice qué plugin usa la sala; necesitas ese plugin instalado;
-- un título cuyo plugin no da identificador de TMDB ni de IMDb, un canal en vivo o un video que no viene de un plugin:
-  solo chat, sin sincronizar.
+- un título cuyo plugin no da identificador de TMDB ni de IMDb, o un video que no viene de un plugin: solo chat, sin
+  sincronizar.
+- **En un canal de En vivo** la sala comparte el canal del anfitrión: quien esté en otro canal ve **Ver el mismo canal**,
+  un toque, nunca un cambio forzado. En vivo no hay posición, así que solo se comparte el canal; el chat y las reacciones
+  funcionan igual que en un título.
 
 ## Organizar una fiesta
 
@@ -98,7 +101,7 @@ aunque la app de chat la haya cambiado: negritas, emojis, saltos de línea o nú
 
 ## El chat
 
-- Los mensajes llenan la pestaña, el más nuevo abajo: los tuyos a la derecha, los de los demás a la izquierda con su nombre
+- Los mensajes llenan el panel, el más nuevo abajo, y el campo de texto queda abajo (sobre el teclado): los tuyos a la derecha, los de los demás a la izquierda con su nombre
   una vez sobre cada tanda. Una reacción se ve como un emoji más grande, y los avisos de la sala («Bea entró») como líneas
   pequeñas centradas.
 - Envía con el **ícono de enviar dentro del campo de texto** o con el botón de enviar de tu teclado.

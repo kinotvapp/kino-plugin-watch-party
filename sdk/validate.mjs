@@ -500,6 +500,10 @@ export async function validate(dirArg, { run = null, args = [], config = {}, rep
     const A = contract.kinoAi;
     notes.push(`ai: kino.ai.ask sends your prompt to a third-party AI (Kilo) and answers { ok, text, model } or { ok: false, error } (never throws); only after the person's own press (${A.fromFunctions.join(", ")}) or from your scheduled job; ${A.limits.perMinute} a minute, ${A.limits.perDay} a day, one at a time, ${A.limits.timeoutMs / 1000} s. The reply is untrusted: a prompt can be injected through what you send, so validate every field and never execute or follow it; json: true only asks for JSON. Tell the person in your own UI what you send. The person may refuse it or switch it off: keep a fallback. The kit answers canned text: KINO_AI_REPLY=..., KINO_AI_ERROR=<code>, KINO_AI_REVOKED=1`);
   }
+  if (m.panel?.contributes && (m.panel.kinds ?? []).includes(contract.kinoLivePanel.kind)) {
+    // Task 11: the tab also joins En vivo channels, after Kino's General tab, with the live context.
+    notes.push(`panel.kinds "live": your tab joins every En vivo channel's panel after Kino's General tab; its context is { kind: "live", live: true, channel: { provider, code, name }, foreign, source } (no position), your player actions are dropped there, no playerEvent; go.liveChannel { provider, code } tunes after the person's press. Try it: node sdk/run.mjs --live-channel <provider>:<code>[:<name>] <this folder> panel -`);
+  }
   if (m.panel?.contributes) {
     // Task 8k: the tab joins the panel of other plugins' titles, with a foreign context; the kit's run shows it.
     const C = contract.manifest.panel.contributes;

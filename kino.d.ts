@@ -790,6 +790,13 @@ interface KinoManifestPanel {
    * from any origin, and `pause` and `speed` too); `go.title` / `go.play` are dropped.
    */
   contributes?: boolean;
+  /**
+   * apiVersion 14 (Task 11), only with `contributes: true`: which content your tab joins. "title": a plugin's title (the rule
+   * above); "live": an En vivo channel, after Kino's own «General» tab, with `context.kind === "live"` (`KinoLivePanelContext`:
+   * the channel, never a position) and `go.liveChannel` to tune. Default `["title"]`; a non-empty list of these two (an
+   * unknown value or an empty list refuses the install).
+   */
+  kinds?: ("title" | "live")[];
 }
 
 /**
@@ -977,7 +984,21 @@ type KinoScreenGo =
   | { screen: KinoScreenOpen }
   | { titleByIds: KinoScreenTitleByIds }
   | { url: KinoScreenUrl }
-  | { copy: KinoScreenCopy };
+  | { copy: KinoScreenCopy }
+  | { liveChannel: KinoScreenLiveChannel };
+
+/**
+ * `go: { liveChannel: { provider, code } }` (Task 11, apiVersion 14, the twelfth shape): Kino tunes the player to the channel
+ * `code` (an item id, 1 to 128 of `A-Z a-z 0-9 . _ ~ -`) of the En vivo provider plugin `provider` (a plugin id, never `own`).
+ *
+ * - Only for a plugin whose approved contributed tab declares `"kinds": ["live"]` (else dropped, logged `needs_live_tab`), and
+ *   only after the person's own tap or press (as `go.url` and `go.copy`).
+ * - The provider must be installed, usable and list live channels; an 18+ provider only while the 18+ code is unlocked; an
+ *   18+ channel is not found while it is locked (Kino's usual message).
+ * - From the player panel on a live channel the channel changes in place (the panel and its pin stay); from anywhere else the
+ *   panel or screen closes and the player opens the channel. Nothing comes back: the next context says the channel.
+ */
+type KinoScreenLiveChannel = { provider: string; code: string };
 
 /**
  * `go: { copy: { text, label?, sensitive? } }` (Task 8x, the eleventh shape): a «Copiar» button. Kino puts `text` on the
@@ -1175,7 +1196,13 @@ type KinoScreenNode =
   | (KinoScreenBase & { type: "Badge"; text: string; textEn?: string })
   | (KinoScreenBase & { type: "LinearProgressIndicator"; value?: number; labelText?: string; labelTextEn?: string })
   | (KinoScreenBase & { type: "CircularProgressIndicator"; text?: string; textEn?: string })
-  | (KinoScreenBase & KinoScreenPaging & { type: "ListView"; items?: KinoScreenNode[]; empty?: KinoScreenNode; columns?: KinoScreenResponsive<number> })
+  | (KinoScreenBase & KinoScreenPaging & { type: "ListView"; items?: KinoScreenNode[]; empty?: KinoScreenNode; columns?: KinoScreenResponsive<number>;
+      /**
+       * Task 14: opens at the last item; while the person is at the end (or one item from it) a new last item scrolls into view;
+       * scrolled up it stays put until they come back. One column, in a list that scrolls itself (a full screen, or a panel with
+       * `layout: "fill"`); drawn flat it does nothing (logged once).
+       */
+      stickToBottom?: KinoScreenResponsive<boolean> })
   /**
    * A button: `ElevatedButton` (Kino's primary), `TextButton`, `IconButton` (needs `icon`), or `Button` with its `variant`
    * (`secondary` has no other name). `submit: true` inside a `Form`: Kino checks the form, then runs the form's `onSubmitted`
@@ -1318,8 +1345,17 @@ interface KinoScreenTableCell { type: "TableCell"; text?: string; textEn?: strin
  * older spelling. A name Kino does not know (Flutter's `Stepper` too) drops the node, logged.
  */
 
-/** `screen` may return its tree with `every` on the root: the screen's timers (KinoScreenTimer). */
-type KinoScreenRoot = KinoScreenNode & { every?: KinoScreenTimer | KinoScreenTimer[] };
+/**
+ * How a player panel's body holds the tree (Task 14, apiVersion 14). "scroll" (the default): the body scrolls, the tree has no
+ * height limit (a `ListView` draws flat, `flex` does nothing). "fill": the root is drawn at the body's size with no body scroll;
+ * `flex` shares the height left and a `ListView` with `flex` is lazy and scrolls itself (a chat: messages over an input row at
+ * the bottom). When the parts without `flex` alone are taller, that render is drawn as "scroll" (logged once). A full screen's
+ * root is always drawn at the screen's size. Any other value is logged and read as "scroll".
+ */
+type KinoScreenLayout = "scroll" | "fill";
+
+/** `screen` may return its tree with `every` on the root (the screen's timers, KinoScreenTimer) and its `layout` (Task 14). */
+type KinoScreenRoot = KinoScreenNode & { every?: KinoScreenTimer | KinoScreenTimer[]; layout?: KinoScreenLayout };
 
 /** A title card's or rail's size. */
 type KinoScreenCardSize = "small" | "medium" | "large";
@@ -1464,6 +1500,8 @@ interface KinoPanelScreenResult {
   tab?: string;
   /** Task 8j: as `KinoPanel.player`: counts only with the `playerControl` capability. */
   player?: KinoPlayerAction;
+  /** Task 14: how the body holds `root` (KinoScreenLayout); "fill" for a chat tab. Here, never on `root`. */
+  layout?: KinoScreenLayout;
 }
 
 /**
@@ -1475,6 +1513,30 @@ interface KinoPanelScreenResult {
 interface KinoPanelScreenContext extends KinoPanelContext {
   state: Record<string, unknown>;
   size: { widthClass: KinoScreenSizeClass; heightClass: KinoScreenSizeClass; orientation: "portrait" | "landscape" };
+}
+
+/**
+ * Task 11 (apiVersion 14): the context of a tab you contribute (`"kinds": ["live"]`) on an En vivo channel. Exactly these keys:
+ * live has no ref, title, ids, position, duration, pause, stats or player block. `channel.provider` is the id of the plugin
+ * that lists the channel, `channel.code` its id there, `channel.name` its listed name: pass the first two to
+ * `go.liveChannel` to tune another device to it. Sent only for a channel its provider's listing confirmed as not 18+, never
+ * for «Mis canales» (the person's own lists). On a zap Kino calls `panel` again with the new channel (a render, never a
+ * press); the panel stays open. Your `player` actions are dropped whole (live_channel); no `playerEvent` on live.
+ * `values.video` is one set for every live channel (the session stays open across zaps). In screen mode `state` and `size` come too, as in `KinoPanelScreenContext`.
+ */
+interface KinoLivePanelContext {
+  kind: "live";
+  live: true;
+  channel: { provider: string; code: string; name: string };
+  foreign: true;
+  source: { pluginId: string; name: string };
+  device: "tv" | "phone";
+  lang: string;
+  tab?: string;
+  values: { video: Record<string, KinoPanelValue>; plugin: Record<string, KinoPanelValue> };
+  features?: ("loading" | "screen")[];
+  state?: Record<string, unknown>;
+  size?: { widthClass: KinoScreenSizeClass; heightClass: KinoScreenSizeClass; orientation: "portrait" | "landscape" };
 }
 
 /**
@@ -1576,12 +1638,12 @@ interface KinoPlugin {
    * apiVersion 9, required when the manifest declares `panel`: the panel the button opens. Called with the context when it
    * opens, on a tab press and every `refreshMs`. 20 s per call; a panel that is not an object shows nothing.
    */
-  panel?(context: KinoPanelContext | KinoPanelScreenContext): Promise<KinoPanel | KinoPanelScreenResult>;
+  panel?(context: KinoPanelContext | KinoPanelScreenContext | KinoLivePanelContext): Promise<KinoPanel | KinoPanelScreenResult>;
   /**
    * apiVersion 9, optional: a button pressed, an input changed or submitted. Called with TWO arguments, `(event, context)`. 20 s
    * per call. While the panel is in screen mode (Task 8i) the event is a `KinoPanelScreenEvent` and the answer a `KinoPanelScreenAnswer`.
    */
-  panelAction?(event: KinoPanelEvent | KinoPanelScreenEvent, context: KinoPanelContext | KinoPanelScreenContext): Promise<KinoPanelAnswer | KinoPanelScreenAnswer | null | void>;
+  panelAction?(event: KinoPanelEvent | KinoPanelScreenEvent, context: KinoPanelContext | KinoPanelScreenContext | KinoLivePanelContext): Promise<KinoPanelAnswer | KinoPanelScreenAnswer | null | void>;
   /**
    * apiVersion 9, optional, needs no `panel`: told about the playing title's player events (fire and forget: 5 s, at most one
    * in flight, events coalesce). May answer a `player` action, a `message` or (Task 8i, apiVersion 14 and later) a new

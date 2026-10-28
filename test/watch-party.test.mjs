@@ -17,7 +17,7 @@ import { createKino, createKitRoom } from "../sdk/kino-shim.mjs";
 import { loadPlugin } from "../sdk/sandbox.mjs";
 import { validate } from "../sdk/validate.mjs";
 import { contract, validateManifest } from "../sdk/contract.mjs";
-import { fakeContext, foreignContext } from "../sdk/panel.mjs";
+import { fakeContext, foreignContext, liveContext } from "../sdk/panel.mjs";
 import { checkPanelScreen, checkPanelScreenAnswer, childNodes, fakePanelScreenContext } from "../sdk/screen.mjs";
 import { createNet, createShortService, deviceKino } from "./net.mjs";
 
@@ -63,8 +63,15 @@ const bubblesOf = (list) => list.items.flatMap((g) => g.type !== "Column" ? [] :
 const rawChat = (raw) => all(raw.root).find((n) => n.key === "chat");
 const focusFirstField = (raw) => all(raw.root).find((n) => n.type === "TextField" && !n.hidden)?.key;
 
-/** The context Kino gives a tab contributed to another plugin's title (Dune on «Latino» by default). */
+/**
+ * The context Kino gives a tab contributed to another plugin's title (Dune on «Latino» by default); with `dev.live` (Task 11) the
+ * live one of an En vivo channel instead: the channel, no position.
+ */
 function ctxOf(dev, now, over = {}) {
+  if (dev.live) {
+    const live = liveContext(dev.live, { device: dev.kind, lang: "es-CO" }, dev.live.sourceName || "TDT");
+    return fakePanelScreenContext(live, { state: { inputs: {}, ui: {}, ...(dev.tab ? { tab: dev.tab } : {}), ...(dev.state || {}) } });
+  }
   const base = fakeContext("movie:438631", { title: "Dune", year: "2021", ids: { tmdb: 438631, imdb: "tt1160419" }, device: dev.kind, positionMs: posAt(dev, now), paused: dev.paused, ...(dev.ctxOver || {}), ...over });
   base.player = { ...base.player, speed: dev.speed || 1 };
   const f = foreignContext(base, "watch-party", dev.source || LATINO);
@@ -2111,6 +2118,80 @@ test("the host silent for more than 2 minutes with its door answering: the norma
   assert.equal(party(r2.guests[0]).banner.kind, "noAnswer", "the door itself is down: no soft notice");
 });
 
+// ---------- Task 11: a party on an En vivo channel ----------
+
+const LA1 = { provider: "tdt", code: "la1", name: "La 1" };
+const LA2 = { provider: "tdt", code: "la2", name: "La 2" };
+
+test("the manifest's tab joins titles and live channels (kinds), and the kit runs it on a channel", async () => {
+  const m = validateManifest(MANIFEST_TEXT);
+  assert.equal(m.ok, true, m.message);
+  assert.deepEqual(m.manifest.panel.kinds, ["title", "live"]);
+});
+
+test("live: the room carries the host's channel, read strictly from a peer; never a position to sync", async () => {
+  const p = await P();
+  const ctx = fakePanelScreenContext(liveContext(LA1, { device: "tv", lang: "es-CO" }, "TDT"));
+  const media = plain(p.mediaOf(ctx));
+  assert.deepEqual(media, { source: { pluginId: "tdt", name: "TDT" }, tmdb: null, imdb: null, kind: "live", season: null, episode: null, title: "La 1", year: null, channel: LA1 });
+  assert.deepEqual(plain(p.readMedia(media)), media, "a peer's copy reads back the same (sameMedia holds)");
+  // A forged channel is dropped, never tuned to: «Mis canales», a wire-form provider, a code with a colon.
+  for (const bad of [{ ...LA1, provider: "own" }, { ...LA1, provider: "plugin:tdt" }, { ...LA1, code: "la:1" }, { provider: "tdt" }]) {
+    assert.equal(p.readMedia({ ...media, channel: bad }).channel, undefined, JSON.stringify(bad));
+    assert.equal(p.mediaOf({ ...ctx, channel: bad }), null);
+  }
+  // Same channel: chat only, said in the header; another channel (or a title): offer the room's channel; never `ok`.
+  assert.deepEqual(plain(p.mediaMatch(ctx, media)), { ok: false, reason: "sameChannel" });
+  const other = fakePanelScreenContext(liveContext(LA2, {}, "TDT"));
+  assert.deepEqual(plain(p.mediaMatch(other, media)), { ok: false, reason: "otherChannel" });
+  assert.deepEqual(plain(p.mediaMatch(ctxOf({ kind: "phone", pos: 0, posAt: T0, paused: false }, T0), media)), { ok: false, reason: "otherChannel" });
+  assert.deepEqual(plain(p.liveChannelGoOf(media)), { liveChannel: { provider: "tdt", code: "la1" } });
+  assert.equal(p.liveChannelGoOf({ ...media, channel: undefined }), null);
+  assert.equal(p.titleByIdsOf(media), null);
+  // No sync on live: whatever the host's state says, a guest gets no player action.
+  assert.equal(p.syncAction({ local: { pos: 0, paused: false, speed: 1 }, st: { pos: 99999, paused: true, speed: 1, at: T0 }, stAt: T0, now: T0, match: p.mediaMatch(other, media) }), null);
+});
+
+test("live: the invitation names the channel and asks for a live channel, still 6 lines", async () => {
+  const p = await P();
+  const media = plain(p.mediaOf(fakePanelScreenContext(liveContext(LA1, {}, "TDT"))));
+  const text = p.invitationText({ short: "41408", words: "a-b-c-d", code: "1234", media });
+  assert.equal(text.split("\n").length, 5);
+  assert.ok(text.includes("En vivo: La 1, con «TDT»"), text);
+  assert.ok(text.includes("En Kino: pon un canal en vivo ▸ panel ▸ Fiesta"), text);
+  assert.ok(Array.from(text).length < 500);
+});
+
+test("live: the guest is offered the host's channel (one tap), and after the host zaps gets the new one as a suggestion", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  host.live = LA1;
+  bea.live = LA2;
+  t = await rounds([host, bea], t + 1000, 4);
+  assert.equal(party(bea).media.channel.code, "la1");
+  let r = await panel(bea, t);
+  assert.equal(r.raw.player, undefined, "nothing to keep in step on live");
+  let banner = ofType(r.panel.root, "banner").find((b) => /canal «La 1»/.test(b.text));
+  assert.ok(banner, texts(r.panel.root).join(" | "));
+  assert.deepEqual(plain(banner.action.onTap.go), { liveChannel: { provider: "tdt", code: "la1" } });
+  // On the same channel: no banner, the header says so.
+  bea.live = LA1;
+  r = await panel(bea, t + 3000);
+  assert.equal(ofType(r.panel.root, "banner").filter((b) => /canal «/.test(b.text)).length, 0);
+  assert.ok(texts(r.panel.root).some((x) => x.includes("✓ Mismo canal")));
+  // The host zaps: Kino asks its tab again with the new channel; the guest is offered it, never moved.
+  host.live = LA2;
+  t = await rounds([host, bea], t + 6000, 4);
+  assert.equal(party(bea).media.channel.code, "la2");
+  r = await panel(bea, t);
+  assert.equal(r.raw.player, undefined);
+  banner = ofType(r.panel.root, "banner").find((b) => /canal «La 2»/.test(b.text));
+  assert.deepEqual(plain(banner.action.onTap.go), { liveChannel: { provider: "tdt", code: "la2" } });
+  // The chat still works on live.
+  await say(bea, "¿viste ese gol?", t + 500);
+  t = await rounds([host, bea], t + 1000, 3);
+  assert.ok(hist(host).some((e) => e.x === "¿viste ese gol?"));
+});
+
 test("regression (field report): a reaction pressed in the palette reaches the plugin with its index, is sent, and shows on both sides; the glyphs are large", async () => {
   let { host, guests: [bea], t } = await room(["Bea"]);
   const p = await P();
@@ -2135,6 +2216,32 @@ test("regression (field report): a reaction pressed in the palette reaches the p
         assert.deepEqual(glyph, { mine: d === who, text: p.EMOJIS[i] }, `${d.id} shows it, on the ${d === who ? "right" : "left"}`);
       }
       t += 3000;
+    }
+  }
+});
+
+test("the chat fills the panel: layout fill on the Chat tab only, the list takes the room left and sticks to the newest message, the input row last", async () => {
+  let { host, guests: [bea], t } = await room(["Bea"]);
+  await say(bea, "hola", t);
+  t = await rounds([host, bea], t + 10, 2);
+  for (const kind of ["phone", "tv"]) {
+    for (const d of [host, bea]) {
+      d.kind = kind;
+      d.tab = undefined;
+      const { raw, panel: shown } = await panel(d, t);
+      assert.equal(raw.layout, "fill", `${d.id} ${kind}: the chat answers layout fill`);
+      assert.equal(shown.layout, "fill", "Kino reads it");
+      const kids = raw.root.children;
+      const list = kids.find((n) => n.key === "chat");
+      assert.deepEqual([list.flex, list.stickToBottom], [1, true]);
+      assert.equal(all(shown.root).find((n) => n.key === "chat").stickToBottom, true);
+      const flexed = kids.filter((n) => n.flex);
+      assert.deepEqual(flexed.map((n) => n.key), ["chat"], "only the list takes the room left");
+      assert.equal(kids.at(-1).key, "inputRow", "the input row is the last child: at the bottom of the panel");
+      d.tab = "room";
+      const room2 = (await panel(d, t)).raw;
+      assert.equal(room2.layout, undefined, "the Sala tab scrolls as usual");
+      d.tab = undefined;
     }
   }
 });

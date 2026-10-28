@@ -52,7 +52,10 @@ plugin means the same cut and the same file, so positions match. When they do no
 
 - another title: the tab offers **Open this title**, Kino's own page for it, where you pick your source;
 - another plugin: the tab names the plugin the room uses; you need that plugin installed;
-- a title whose plugin gives no TMDB or IMDb id, a live channel or a video that is not from a plugin: chat only, no sync.
+- a title whose plugin gives no TMDB or IMDb id, or a video that is not from a plugin: chat only, no sync.
+- **On an En vivo channel** the room shares the host's channel: a guest on another channel gets **Watch the same
+  channel**, one tap, never a forced change. Live has no position, so only the channel is shared; chat and reactions work
+  as on a title.
 
 ## Host a party
 
@@ -95,7 +98,7 @@ the chat app did to it: bold, emoji, line breaks or full-width digits.
 
 ## The chat
 
-- The messages fill the tab, newest at the bottom: yours on the right, the others' on the left with their name once
+- The messages fill the panel, newest at the bottom, and the text field stays at the bottom (above the keyboard): yours on the right, the others' on the left with their name once
   above each run. A reaction shows as a larger emoji, and room notes ("Bea joined") as small centred lines.
 - Send with the **send icon inside the text field**, or with your keyboard's own send button.
 - The eight reactions are hidden behind the **emoji button** next to the field. Press it to show them; picking one sends

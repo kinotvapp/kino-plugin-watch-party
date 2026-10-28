@@ -5,7 +5,7 @@
 // invalid node, style value, action or field is dropped with a reason. Like panel.mjs it reads the answer the way org.json
 // does (the answer crosses to Kino as JSON), and like the Kotlin it walks a JSON object's keys SORTED wherever the walk
 // can log, so the lines come out in the same order. plugins/sdk/test/screen-cases.json is the case table both sides share.
-import { contract, isUserServer, javaDouble, screenGoOf, screenItems, titleByIdsOf, urlGoOf, copyGoOf } from "./contract.mjs";
+import { contract, isUserServer, javaDouble, screenGoOf, screenItems, titleByIdsOf, urlGoOf, copyGoOf, liveChannelGoOf } from "./contract.mjs";
 import { cappedLog, httpsImage, panelAccentOf, panelMessageOf, panelPlayerOf, panelRefreshOf, panelTabsOf } from "./panel.mjs";
 
 // ---------- limits and name tables (ScreenLimits, ScreenWidgets; numbers come from the contract file) ----------
@@ -749,6 +749,8 @@ class Reader {
       case "list": {
         const columns = this.int(o, type, "columns", 1, LIMITS.maxGridColumns, 1);
         const paging = this.paging(o, type);
+        // Task 14: the list opens at its end and follows new items while the person is there.
+        const stickToBottom = this.flag(o, type, "stickToBottom");
         return (k) => {
           const items = k ? this.flatWhile(false, () => this.children(o, depth, "items", LIMITS.maxListItems)) : [];
           let empty = null;
@@ -758,7 +760,7 @@ class Reader {
             else if (isObj(e)) empty = this.flatWhile(false, () => this.node(e, depth + 1));
             else this.log("screen: list empty is not a node, dropped");
           }
-          return { items, empty, columns, paging };
+          return { items, empty, columns, paging, stickToBottom };
         };
       }
       case "button": {
@@ -1735,7 +1737,7 @@ class Reader {
     return k === null ? null : { [op]: k };
   }
 
-  /** Exactly one of the eleven go shapes, logged under [where] when it is not. */
+  /** Exactly one of the twelve go shapes, logged under [where] when it is not. */
   goOf(o, where) {
     const keys = Object.keys(o);
     const k = keys.length === 1 && GO_KEYS.includes(keys[0]) ? keys[0] : null;
@@ -1757,6 +1759,10 @@ class Reader {
     if (k === "copy") {
       const g = copyGoOf(v, (why) => this.log(`${where} go.copy ${why}, dropped`));
       return g === null ? null : { copy: g };
+    }
+    if (k === "liveChannel") {
+      const g = liveChannelGoOf(v, (why) => this.log(`${where} go.liveChannel ${why}, dropped`));
+      return g === null ? null : { liveChannel: g };
     }
     if (k === "section" || k === "categories" || k === "close") return v === true ? { [k]: true } : bad("must be true");
     if (!isObj(v)) return bad("is not an object");
@@ -1895,14 +1901,32 @@ export function checkScreenTree(value, lang = "es", widgets = WIDGETS, { allowSe
   const dropped = [];
   const v = wire(value);
   let every = [];
+  let layout = SCREEN_LAYOUT.values[0];
   const tree = cappedLog((line) => dropped.push(line), "screen", (capped) => {
     if (!isObj(v)) { capped("screen: the tree is not a JSON object"); return null; }
     const root = new Reader(lang, new Set(widgets ?? WIDGETS), capped, allowSeries, settingsModel(settings)).node(v, 1);
-    // The root's timers, read after the tree (PluginScreenOutput.frame): their lines come last.
-    if (root !== null) every = timersOf(opt(v, "every"), capped);
+    // The root's timers, read after the tree (PluginScreenOutput.frame): their lines come last; then its layout (Task 14).
+    if (root !== null) {
+      every = timersOf(opt(v, "every"), capped);
+      layout = layoutOf(opt(v, SCREEN_LAYOUT.field), "screen", capped);
+    }
     return root;
   });
-  return { tree, dropped, every };
+  return { tree, dropped, every, layout };
+}
+
+/** contract.manifest.screen.layout (Task 14): the screen result's `layout` field and its values, the default first. */
+export const SCREEN_LAYOUT = contract.manifest.screen.layout;
+
+/**
+ * PluginScreenOutput.layoutOf (Task 14): a screen result's `layout`; absent or null is "scroll", silently; any other value
+ * outside the contract's values is logged under [where] and read as "scroll".
+ */
+export function layoutOf(v, where, log) {
+  if (absent(v)) return SCREEN_LAYOUT.values[0];
+  if (SCREEN_LAYOUT.values.includes(v)) return v;
+  log(`${where}: layout ${fmt(v)} is not ${SCREEN_LAYOUT.values.join(" or ")}, read as ${SCREEN_LAYOUT.values[0]}`);
+  return SCREEN_LAYOUT.values[0];
 }
 
 /**
@@ -2114,6 +2138,7 @@ function routeOf(raw, log) {
 /** contract.output.panel.screen: the screen-format panel's limits and fields. */
 export const PANEL_SCREEN = contract.output.panel.screen;
 const NO_EVERY = "panel: every is not available in the player panel (refreshMs is its periodic call), dropped";
+const LAYOUT_ON_ROOT = "panel: layout belongs on the panel result beside root, the root's is ignored";
 
 /**
  * PanelScreenOutput.isScreen: whether a `panel` result is a screen-format panel (`format: "screen"` from a plugin of apiVersion
@@ -2154,11 +2179,14 @@ export function checkPanelScreen(value, lang = "es", { allowSeries = true, setti
     const raw = opt(v, "root");
     if (!isObj(raw)) { capped("panel: root is not a node, the whole panel invalid"); return null; }
     if (has(raw, "every")) capped(NO_EVERY);
+    // Task 14: a panel's layout sits on the result, beside root (a screen's sits on its root object).
+    if (has(raw, SCREEN_LAYOUT.field)) capped(LAYOUT_ON_ROOT);
     const root = new Reader(lang, new Set(WIDGETS), capped, allowSeries, settingsModel(settings), { maxDepth: PANEL_SCREEN.maxDepth, maxNodes: PANEL_SCREEN.maxNodes, inPanel: true }).node(raw, 1);
     if (root === null) return null;
     // Task 8j: the result's own player (a refreshMs tick's): honoured only with the playerControl capability.
     const player = panelPlayerOf(opt(v, "player"), capped);
-    return { root, title, accent, refreshMs, tabs, tab, ...(player ? { player } : {}) };
+    const layout = layoutOf(opt(v, SCREEN_LAYOUT.field), "panel", capped);
+    return { root, title, accent, refreshMs, tabs, tab, layout, ...(player ? { player } : {}) };
   });
   return { panel, dropped };
 }

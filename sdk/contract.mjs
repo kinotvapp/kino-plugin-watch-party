@@ -233,6 +233,36 @@ export function copyGoOf(v, bad) {
 }
 
 /**
+ * PluginScreenOutput.liveChannelGoOf (Task 11): a `go.liveChannel`'s value, exactly `provider` (a plugin id, never a reserved
+ * one) and `code` (an item id: the channel's id in that plugin's listing). Or null with [bad] told the first reason.
+ */
+export function liveChannelGoOf(v, bad) {
+  const L = contract.manifest.screen.goLiveChannel;
+  if (v === null || typeof v !== "object" || Array.isArray(v)) { bad("is not an object"); return null; }
+  if (Object.keys(v).some((k) => !L.fields.includes(k))) { bad(`takes only ${L.fields.join(", ")}`); return null; }
+  if (typeof v.provider !== "string" || !new RegExp(L.providerPattern).test(v.provider) || L.reservedProviders.includes(v.provider)) {
+    bad("provider must be a plugin id"); return null;
+  }
+  if (typeof v.code !== "string" || !new RegExp(L.codePattern).test(v.code)) { bad("code must be a channel id (1 to 128 letters, digits, . _ ~ -)"); return null; }
+  return { provider: v.provider, code: v.code };
+}
+
+/**
+ * ScreenLiveChannel.refusal (Task 11): why a kept `go.liveChannel` from [manifest]'s plugin is not honoured for an event of
+ * [trigger] ("press", "submit", "change", "open", "timer", ...), or null when Kino tunes. Not the person's own press or submit:
+ * "not_press"; a plugin whose approved contributing panel does not declare "live" in kinds: goLiveChannel.needsLiveTabLog.
+ */
+export function liveChannelGoRefusal(manifest, trigger) {
+  const L = contract.manifest.screen.goLiveChannel;
+  const C = contract.manifest.panel.contributes;
+  if (!L.fromTriggers.includes(trigger)) return "not_press";
+  const caps = manifest?.capabilities ?? [];
+  const kinds = Array.isArray(manifest?.panel?.kinds) ? manifest.panel.kinds : C.kinds.default;
+  if (manifest?.panel?.contributes !== true || !caps.includes(C.capability) || !kinds.includes(L.needsKind)) return L.needsLiveTabLog;
+  return null;
+}
+
+/**
  * ScreenUrl.cleanTitle (Task 8s fix round 1, M3): goUrl.titleScrubPattern's characters removed, runs of combining marks cut to
  * goUrl.maxCombiningMarks, trimmed.
  */
@@ -625,7 +655,19 @@ function validateManifestObject(o, { knownPermissions = contract.permissions } =
     const iconFile = typeof rawFile === "string" && rawFile.replace(/^\.\//, "") ? rawFile.replace(/^\.\//, "") : null;
     if (icon !== null && iconFile !== null) return bad("panel", 'The "panel" field takes "icon" or "iconFile", not both');
     if (iconFile !== null && (!isSafeRelativePath(iconFile) || !iconFile.endsWith(".png"))) return bad("panel", 'The "panel.iconFile" field must be a relative path to a .png');
-    panel = { label, ...(labelEn ? { labelEn } : {}), ...(icon !== null ? { icon } : {}), ...(iconFile !== null ? { iconFile } : {}), ...(contributes ? { contributes: true } : {}) };
+    // Task 11 (apiVersion 14): which content a contributed tab joins, "title" and/or "live"; default ["title"].
+    const K = C.kinds;
+    let kinds = null;
+    if (o.apiVersion >= C.apiVersion && o.panel.kinds !== undefined && o.panel.kinds !== null) {
+      if (!contributes) return bad("panel", K.needsContributesMessage);
+      const raw = o.panel.kinds;
+      if (!Array.isArray(raw) || raw.length === 0 || raw.some((k) => !K.values.includes(k))) return bad("panel", K.badMessage);
+      kinds = K.values.filter((k) => raw.includes(k));
+    }
+    panel = {
+      label, ...(labelEn ? { labelEn } : {}), ...(icon !== null ? { icon } : {}), ...(iconFile !== null ? { iconFile } : {}), ...(contributes ? { contributes: true } : {}),
+      ...(contributes ? { kinds: kinds ?? [...K.default] } : {}),
+    };
   }
   // Task 8k: the capability and `panel.contributes` need each other (the capability is what the person approves).
   if (panel?.contributes === true && !caps.includes(m.panel.contributes.capability)) return bad("panel", m.panel.contributes.needsCapabilityMessage);

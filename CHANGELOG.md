@@ -24,6 +24,10 @@
   - creating or joining opens the chat on its input;
   - sending and reacting bring it back there;
   - errors focus **Try again**, and recovery screens focus their main button.
+- **The chat fills the panel:** the messages take the room and the input stays at the bottom, above the keyboard; the
+  list opens at the newest message and follows new ones.
+- **Live channels:** the tab also appears on an En vivo channel. The room shares the host's channel, and a guest on
+  another channel gets **Watch the same channel** (never a forced change). Chat and reactions work as on a title.
 - **A host who steps out of Kino is not "gone":** while the host's room still answers, guests see "The host stepped away;
   the room is still open" for up to 2 minutes instead of "The host is not answering". The room catches up as soon as the
   host is back.

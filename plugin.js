@@ -24,6 +24,9 @@
 //   which room to join, and the TV joins as a `display` seat that the clients treat as reactions-only.
 // - Everyone must watch through the SAME source plugin and the same title (`ctx.source`, `ctx.ids`): otherwise the tab offers
 //   «Abrir este título» (`go.titleByIds`, Kino's own title page) or names the plugin the room uses.
+// - On an En vivo channel (`"kinds": ["title", "live"]`, `ctx.live`), the host's channel is the shared state: no position or
+//   pause to keep in step. A guest elsewhere is offered «Ver el mismo canal» (`go.liveChannel`, one tap); when the host zaps,
+//   the guests get the new channel as that same suggestion, never a forced change.
 //
 // Everything a peer sends is UNTRUSTED: each message is checked for its shape, its sizes and its types, unknown kinds and extra
 // fields are ignored, names are scrubbed, rates are capped per member, answers are budgeted, and only the host's messages move
@@ -299,8 +302,27 @@ export function chatAllowed(times, who, now) {
 
 // ---------- the title and the source (pure) ----------
 
-/** What the room carries about the title, from a panel context; null when the playing video is not a plugin's title. */
+/** An En vivo channel as Kino names it (`ctx.channel`, `go.liveChannel`): its provider plugin's id and its id there, its name. */
+export function channelOf(c) {
+  if (!isObj(c) || typeof c.provider !== "string" || typeof c.code !== "string") return null;
+  if (!/^[a-z0-9][a-z0-9-]{1,39}$/.test(c.provider) || c.provider === "own" || !/^[A-Za-z0-9._~-]{1,128}$/.test(c.code)) return null;
+  return { provider: c.provider, code: c.code, name: scrub(typeof c.name === "string" ? c.name : "", 80) };
+}
+
+/**
+ * What the room carries about the title, from a panel context; null when the playing video is not a plugin's title. On an En
+ * vivo channel (`ctx.live`): the channel, with no ids (live has no position to share).
+ */
 export function mediaOf(ctx) {
+  if (isObj(ctx) && ctx.live === true) {
+    const channel = channelOf(ctx.channel);
+    if (!channel) return null;
+    const name = isObj(ctx.source) && typeof ctx.source.name === "string" ? ctx.source.name : "";
+    return {
+      source: { pluginId: channel.provider, name: scrub(name, 40) },
+      tmdb: null, imdb: null, kind: "live", season: null, episode: null, title: scrub(channel.name, 120), year: null, channel,
+    };
+  }
   if (!isObj(ctx) || !isObj(ctx.source) || typeof ctx.source.pluginId !== "string") return null;
   const ids = isObj(ctx.ids) ? ctx.ids : {};
   const kind = ctx.kind === "episode" ? "series" : ctx.kind === "movie" ? "movie" : "live";
@@ -321,6 +343,7 @@ export function mediaOf(ctx) {
 export function readMedia(m) {
   if (!isObj(m) || !isObj(m.source) || typeof m.source.pluginId !== "string") return null;
   if (!["movie", "series", "live"].includes(m.kind)) return null;
+  const channel = m.kind === "live" ? channelOf(m.channel) : null;
   return {
     source: { pluginId: scrub(m.source.pluginId, 64), name: scrub(typeof m.source.name === "string" ? m.source.name : "", 40) },
     tmdb: isInt(m.tmdb, 1, 2147483647) ? m.tmdb : null,
@@ -330,6 +353,7 @@ export function readMedia(m) {
     episode: m.kind === "series" && isInt(m.episode, 1, 9999) ? m.episode : null,
     title: scrub(typeof m.title === "string" ? m.title : "", 120),
     year: isInt(m.year, 1870, 2100) ? m.year : null,
+    ...(channel ? { channel } : {}),
   };
 }
 
@@ -339,10 +363,16 @@ const sameMedia = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * Whether this guest watches what the room watches. `ok` only when BOTH the source plugin and the title match (same source =
  * same cut and encode, so positions agree). Else `reason`: "noSource" (not a plugin's title), "live" (chat only), "noIds" (the
  * room's title has no TMDB or IMDb id: it cannot be matched, so it is never synced), "otherTitle" (offer Kino's title page),
- * "otherSource" (name the room's plugin), "noRoomTitle" (the room has no title yet).
+ * "otherSource" (name the room's plugin), "noRoomTitle" (the room has no title yet). The room on an En vivo channel: never `ok`
+ * (nothing to keep in step), "sameChannel" (this guest is on it) or "otherChannel" (offer «Ver el mismo canal»).
  */
 export function mediaMatch(ctx, media) {
   if (!media) return { ok: false, reason: "noRoomTitle" };
+  if (media.kind === "live" && media.channel) {
+    const mine = isObj(ctx) && ctx.live === true ? channelOf(ctx.channel) : null;
+    const same = mine && mine.provider === media.channel.provider && mine.code === media.channel.code;
+    return { ok: false, reason: same ? "sameChannel" : "otherChannel" };
+  }
   const mine = mediaOf(ctx);
   if (!mine) return { ok: false, reason: "noSource" };
   if (media.kind === "live" || mine.kind === "live") return { ok: false, reason: "live" };
@@ -352,6 +382,12 @@ export function mediaMatch(ctx, media) {
   if (!sameId || mine.kind !== media.kind || !sameEpisode) return { ok: false, reason: "otherTitle" };
   if (mine.source.pluginId !== media.source.pluginId) return { ok: false, reason: "otherSource" };
   return { ok: true, reason: "same" };
+}
+
+/** The room's En vivo channel to tune to (`go.liveChannel`, the person's own tap), or null when the room is not on one. */
+export function liveChannelGoOf(media) {
+  if (!media || media.kind !== "live" || !media.channel) return null;
+  return { liveChannel: { provider: media.channel.provider, code: media.channel.code } };
 }
 
 /** Kino's own title page for the room's title (`go.titleByIds`), or null when the room has no id for it. */
@@ -659,18 +695,20 @@ export const INVITE_MAX = 500;
  * no member ids, no tunnel address. Always under INVITE_MAX characters (a long title is cut first).
  */
 export function invitationText({ short = null, words, code, media = null }) {
+  // On an En vivo channel the friend opens the panel on any channel: the tab offers the room's.
+  const play = media && media.kind === "live" && media.channel ? "pon un canal en vivo" : "reproduce el mismo título";
   const lines = (titleLine) => (short ? [
     "Únete a mi fiesta en Kino 🎬",
     ...(titleLine ? [titleLine] : []),
     `Código: ${short}`,
-    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.",
+    `En Kino: ${play} ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.`,
     "(Join my Kino watch party: type the code above in Kino.)",
   ] : [
     "Únete a mi fiesta en Kino 🎬",
     ...(titleLine ? [titleLine] : []),
     `Palabras: ${words}`,
     `Código: ${code}`,
-    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Entrar con palabras y código.",
+    `En Kino: ${play} ▸ panel ▸ Fiesta ▸ Entrar con palabras y código.`,
     "(Join my Kino watch party: words + code above.)",
   ]).join("\n");
   const titleOf = (title) => {
@@ -1805,6 +1843,12 @@ function matchBanner(p, ctx) {
     case "noSource": return Banner("info", both("Este video no es de un plugin: solo chat.", "This video is not a plugin's: chat only."));
     case "live": return Banner("info", both("En vivo: solo chat, sin sincronizar.", "Live: chat only, no sync."));
     case "noIds": return Banner("info", both("No se puede sincronizar este título. Solo chat.", "This title cannot be synced. Chat only."));
+    case "sameChannel": return null; // said in the header row
+    case "otherChannel": {
+      // The host's channel (also after a zap): a suggestion, one tap tunes; never a forced change.
+      const name = p.media.title || p.media.channel.code;
+      return Banner("warning", both(`La sala ve el canal «${name}».`, `The room watches the channel “${name}”.`), Action(both("Ver el mismo canal", "Watch the same channel"), { go: liveChannelGoOf(p.media) }));
+    }
     case "otherTitle": return Banner("warning", both(`La sala ve «${p.media.title || "otro título"}».`, `The room watches “${p.media.title || "another title"}”.`), open);
     case "otherSource": {
       const name = (p.media && p.media.source.name) || p.media.source.pluginId;
@@ -1910,7 +1954,7 @@ function chatList(p, now, ctx) {
   p.notes.filter((n) => now - n.at < 20000).slice(-2).forEach((n, i) => {
     items.push(Text(both(n.es, n.en), { key: "note" + i, style: "caption", color: "muted", fill: true, crossAxisAlignment: "center" }));
   });
-  return { type: "ListView", key: "chat", flex: 1, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
+  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
 }
 
 /**
@@ -2188,6 +2232,9 @@ export function view(p, ctx, now, player = null) {
     ...base,
     tabs: [{ id: "chat", label: T.chatTab[0], labelEn: T.chatTab[1] }, { id: "room", label: T.roomTab[0], labelEn: T.roomTab[1] }],
     tab,
+    // The chat fills the panel: the messages take the room left and the input row stays at the bottom (above the keyboard).
+    // The Sala tab scrolls as usual.
+    ...(tab === "chat" ? { layout: "fill" } : {}),
     root: { type: "Column", gap: 8, padding: 8, children: [...top, ...head, ...(tab === "room" ? roomTab(p, ctx) : chatTab(p, now, ctx))] },
   });
 }
@@ -2201,7 +2248,9 @@ function headerRow(p, ctx) {
   const count = p.roster.length;
   const status = p.role === "host"
     ? both(`Eres el anfitrión · ${count} ${count === 1 ? "persona" : "personas"}`, `You host · ${count} ${count === 1 ? "person" : "people"}`)
-    : both(`Anfitrión: ${displayName(p.hostName)}${m && m.ok ? " · ✓ Viendo lo mismo" : ""}`, `Host: ${displayName(p.hostName, true)}${m && m.ok ? " · ✓ Watching the same" : ""}`);
+    : m && m.reason === "sameChannel"
+      ? both(`Anfitrión: ${displayName(p.hostName)} · ✓ Mismo canal`, `Host: ${displayName(p.hostName, true)} · ✓ Same channel`)
+      : both(`Anfitrión: ${displayName(p.hostName)}${m && m.ok ? " · ✓ Viendo lo mismo" : ""}`, `Host: ${displayName(p.hostName, true)}${m && m.ok ? " · ✓ Watching the same" : ""}`);
   return {
     type: "Row", key: "headerRow", gap: 4, crossAxisAlignment: "center",
     children: [

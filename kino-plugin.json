@@ -23,12 +23,16 @@
   ],
   "panel": {
     "contributes": true,
+    "kinds": [
+      "title",
+      "live"
+    ],
     "label": "Fiesta",
     "labelEn": "Party",
     "icon": "heart"
   },
   "signature": {
     "authorKey": "82b87b938e0a95b142467c815a8823cb54310a13a828c3c4c77b1eda43294ae6",
-    "value": "5a802083c275d54c5716637f38a96260a80845eb0d2ce774fa954949a15504c4bd79e88b58b495542a4b1679a8dce1ee14fe467030ae71c73f8c198f32679406"
+    "value": "ad5fbeb7aafdece9a391edd2ee62b002a4b5a45cbed2050679e1697eb7d7d56ae441ecb97c9c201922983ddf6288a6f4fe6e8901fef4c4f315813a26aeab8109"
   }
 }
