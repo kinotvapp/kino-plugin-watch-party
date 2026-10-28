@@ -37,6 +37,8 @@ export const ANCHORS = {
   titleCard: "title-card", titleRail: "title-rail", titleGrid: "title-grid", heroCard: "hero-card", popup: "popup", form: "form",
   settings: "settings", banner: "banner", accordion: "accordion", skeleton: "skeleton", qr: "qr", stepper: "number-stepper",
   table: "table", tr: "table-row", td: "table-cell",
+  fab: "floating-action-button", listTile: "list-tile", avatar: "circle-avatar", pageView: "page-view",
+  scaffold: "scaffold", appBar: "app-bar", navigationBar: "navigation-bar",
 };
 /** A go shape's anchor. */
 export const goAnchor = (g) => "go-" + g.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
@@ -108,7 +110,7 @@ export const PROPS = {
     ["maxLines", "integer ≥ 1", "none", "cut with an ellipsis"],
     ["bold", "boolean", "`false`", "headings are bold already; `false` never thins one"],
     [S.textTime.field, "epoch ms", "none", `a whole number 0 to ${n(S.textTime.maxMs)}: Kino writes the time itself in the app's language ([Text with a time](#text-time))`],
-    [S.textTime.formatField, codes(S.textTime.formats, " \\| "), code(S.textTime.formats[0]), `\`relative\` («hace 2 min», rewritten every ${S.textTime.refreshMs / 60000} minute while shown, no call to you) or \`clock\` («18:42», the device's 12/24 h)`],
+    [S.textTime.formatField, codes(S.textTime.formats, " \\| "), code(S.textTime.formats[0]), `\`relative\` («hace 2 min», rewritten every ${S.textTime.refreshMs / 60000} minute while shown, no call to you), \`clock\` («18:42», the device's 12/24 h) or \`countdown\` («0:42» left, every second, «0:00» once reached)`],
   ],
   image: [
     ["url", "https URL", "required without `fallback`", "a public https host (no declaration needed); with a `fallback`, no `url` draws the fallback (an empty or refused one too, logged)"],
@@ -225,7 +227,10 @@ export const PROPS = {
     [S.declaredPopups.anchor.field, "a node's key", "none", "drawn next to that node, over the content, taking no room ([anchored pop-up](#anchored-popup)); the only pop-up a player panel draws"],
   ],
   form: [kids("nodes (its fields among them)"), ["onSubmitted", ACTION, "required", "runs only when every field passes; its event's `value` holds every field by key"]],
-  settings: [["keys", "string[]", "all settings", "only those settings, in that order; each setting shows at most once per screen"]],
+  settings: [
+    ["keys", "string[]", "all settings", "only those settings, in that order; each setting shows at most once per screen"],
+    [S.settingsAutoSave.field, "boolean", "`false`", `its ${codes(S.settingsAutoSave.types, " and ")} settings save as they change (no \`validateSettings\`); with only those, no Guardar ([settings node](#settings))`],
+  ],
   banner: [
     ["text", "string", "required", "`textEn`"],
     ["role", codes(S.roles, " \\| "), "`info`", "Kino's colour and icon for it"],
@@ -266,6 +271,55 @@ export const PROPS = {
     ["children", "`TableCell[]`", "none", `at most ${L.maxTableColumns}; a short row is padded`],
     ["key", "string", "none", "lets `show`, `hide`, `toggle` name the row"],
     ["hidden", "boolean", "`false`", "starts hidden; a required field in a hidden row is not checked"],
+  ],
+  fab: [
+    ["icon", "a Kino icon name", "required", "drawn on Kino's primary fill"],
+    ["labelText", "string", "none", "the extended form: the label beside the icon (`labelTextEn`); else what a screen reader says is the `tooltip`, else Kino's own word"],
+    ["onPressed", ACTION, "required", "what a press does"],
+    ["fabPosition", codes(S.flutterNodes.fabPositions, " \\| "), "`end`", "bottom end or bottom centre of the plugin's area, never under the system bars or the keyboard ([floating action button](#floating-action-button))"],
+  ],
+  listTile: [
+    ["title", "string", "required", "`titleEn`; at most two lines"],
+    ["subtitle", "string", "none", "`subtitleEn`; Kino's muted second line"],
+    ["leading", NODE, "none", `one of ${codes(S.flutterNodes.tileSlotWidgets.map((w) => namesOf(w)[0]))}, never pressed itself`],
+    ["trailing", NODE, "none", "as `leading`, at the end"],
+    ["dense", "boolean", "`false`", `a lower row (${48} dp instead of 56, 72 with a subtitle)`],
+  ],
+  avatar: [
+    ["image", "https URL", "none", "a public https picture, through Kino's image pipeline; when it fails, the initials"],
+    ["text", "string", "none", `initials, at most ${S.flutterNodes.avatarMaxTextChars} characters (\`textEn\`)`],
+    ["icon", "a Kino icon name", "`person`", "without a picture or initials"],
+    ["radius", `${S.flutterNodes.avatarMinRadius} to ${S.flutterNodes.avatarMaxRadius} (dp)`, code(S.flutterNodes.avatarDefaultRadius), "always a circle: a `CircleAvatar` takes no `borderRadius`"],
+    ["backgroundColor", "a colour role", "`primaryContainer`", "its initials and icon in the role's readable colour"],
+    ["labelText", "string", "none", "what a screen reader says (`labelTextEn`); else the initials"],
+  ],
+  pageView: [
+    kids("nodes (the pages)"),
+    ["initialPage", "integer", "`0`", "the first look only; past the last page, the last"],
+    ["onPageChanged", ACTION, "none", "its event's `value` is the settled page's index"],
+    ["autoPlayMs", `${n(S.flutterNodes.autoPlayMinMs)} to ${n(S.flutterNodes.autoPlayMaxMs)}`, "none", "turns the page on its own; paused while touched or focused and with animations off"],
+    ["viewportFraction", `${S.flutterNodes.viewportFractionMin} to 1`, "`1`", "below 1, Kino's carousel: the neighbouring pages peek"],
+    ["padEnds", "boolean", "`true`", "the first and last pages centred in a carousel"],
+  ],
+  scaffold: [
+    ["appBar", "an `AppBar`", "none", "pinned at the top of your area, under Kino's own title bar (never replacing or covering it)"],
+    ["body", NODE, "required", "the bounded height left: a `ListView` or a scroll in it scrolls itself while the bars stay"],
+    ["floatingActionButton", "a `FloatingActionButton`", "none", "above the bottom bar"],
+    ["bottomNavigationBar", "a `NavigationBar`", "none", "at the bottom"],
+  ],
+  appBar: [
+    ["title", "string", "none", "`titleEn`; read as a heading by a screen reader"],
+    ["leading", "an `IconButton`", "none", "with a `labelText` (back, a menu)"],
+    ["actions", "`IconButton[]`", "none", `at most ${S.scaffold.maxAppBarActions}, each with a \`labelText\`; a \`badge\` allowed`],
+    ["bottom", "a `TabBar`", "none", "under the row"],
+    ["centerTitle", "boolean", "`false`", "the title centred"],
+    ["backgroundColor", "a colour role", "Kino's surface", "its text and icons in the role's readable colour"],
+  ],
+  navigationBar: [
+    ["items", "`{ key, icon, label, labelEn?, badge? }[]`", "required", `${S.scaffold.minNavItems} to ${S.scaffold.maxNavItems}, keys distinct`],
+    ["value", "string", "the first item", "the picked item's key (or `selectedIndex`); NOT in `state.inputs`: keep it in your state from `onChanged`"],
+    ["selectedIndex", "integer", "none", "the picked item by its place, when there is no `value`"],
+    ["onChanged", ACTION, "none", "its event's `value` is the item's key"],
   ],
   td: [
     ["text", "string", "none", "a plain cell (`textEn`); with a `text` the children are ignored"],
@@ -311,6 +365,8 @@ export function propRows(old) {
       const r = rows.find((x) => x[0] === rule);
       if (r && !r[3].includes("form rule")) r[3] = `${r[3]}${r[3] ? "; " : ""}form rule inside a \`Form\``;
     }
+    // Task 18 (G8): every input takes the plugin's own verdict.
+    rows.push([S.forceError.field, "string", "none", `your own verdict under the field (\`forceErrorTextEn\`, at most ${S.forceError.maxChars} characters) until the person edits it ([validation](#validation))`]);
   }
   const named = new Set(rows.map((r) => r[0]));
   const layout = old === "td" ? S.tableCellProps : S.layoutProps[old] || [];
@@ -342,6 +398,10 @@ const COMMON = [
   ["autofocus", "boolean", "`false`", "a node that takes focus: where focus goes when a render left it nowhere ([shared properties](#shared-properties))"],
   ["selected", "boolean", "none", "a button or a card with `onTap`: Kino's selected look; `ui` `set` and `toggle` (`prop: \"selected\"`) change it"],
   ["badge", "`\"dot\"` or `{ text, textEn?, color? }`", "none", `a button, a card with \`onTap\`, a tab: a count (at most ${S.sharedProps.badge.maxChars} characters) or a dot on its top end corner`],
+  ["visible", "boolean", "`true`", "`false` hides it as `hidden: true` does ([animations](#animate))"],
+  [S.tooltip.field, "string", "none", `a node that does something: Kino's hint (\`tooltipEn\`), at most ${S.tooltip.maxChars} characters; never essential information ([tooltip](#tooltip))`],
+  [S.enabledAt.field, "epoch ms", "none", "a button, a `FloatingActionButton`, a card or a `ListTile` with `onTap`: off until that time on the device's clock, then on by itself, no call to you ([text with a time](#text-time))"],
+  [S.pressBudget.loadingField, "boolean", "`false`", "a button, a `FloatingActionButton`, a card or a `ListTile` with `onTap`: Kino's busy look (a spinner, no press, read as busy); Kino also draws it on the node pressed while its call runs long ([busy and slow presses](#busy))"],
 ];
 
 const STYLE_VALUES = {
@@ -358,6 +418,15 @@ const STYLE_VALUES = {
   span: `1 to ${L.gridColumns} or \`"auto"\` (default), only in a \`Row\` with \`wrap: true\``,
   offset: `0 to ${L.gridColumns - 1}, only in a \`Row\` with \`wrap: true\``,
   maxWidthFraction: `${S.maxWidthFraction.min} to ${S.maxWidthFraction.max} in steps of ${S.maxWidthFraction.step}: at most that share of the parent's width (exactly, with \`fill\`)`,
+  alignSelf: "`start`, `center`, `end`, `stretch`: this child across its `Row` or `Column`, over the parent's `crossAxisAlignment` ([box and text properties](#box-props))",
+  textAlign: `${codes(S.boxProps.textAligns)}: the paragraph of a node that draws text (${codes(S.boxProps.textAlignWidgets.map((w) => namesOf(w)[0]))})`,
+  border: `\`{ width?, color? }\` on a box: width 0 to ${S.boxProps.border.maxWidth} dp (default ${S.boxProps.border.defaultWidth}), a colour role (default Kino's outline)`,
+  elevation: `0 to ${S.boxProps.maxElevation} on a \`Card\` or a \`Stack\`: Kino's shadow (a card's tonal lift too)`,
+  background: "a colour role: a box's fill (its content reads in the role's on-colour)",
+  minWidth: S.sizeScale.join(", "), maxWidth: S.sizeScale.join(", "), maxHeight: S.sizeScale.join(", "),
+  positioned: "`{ top?, left?, right?, bottom?, width?, height? }` on a `Stack` child: dp or `\"25%\"` of the stack ([positioned stack](#positioned))",
+  opacity: "0 to 1; below 0.38 the node takes no press and no focus ([animations](#animate))",
+  animate: "`{ duration?, curve? }` on a box or a positioned child: changes glide ([animations](#animate))",
 };
 
 const UI_OP_TEXT = {

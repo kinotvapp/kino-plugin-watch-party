@@ -5,28 +5,37 @@ How the plugin works inside, how to test it and how a new version is made. The p
 
 ## Where the code comes from
 
-`plugin.js` and `test/` are kept in sync with the `watch-party` example of Kino's plugin guide, where the player panel
-tabs, `kino.room` and `playerControl` this plugin uses are developed. Kino's repository is the source of truth for the
-code; this repository owns the publishing metadata (`id`, `name`, `version`, `description`, `author`, `homepage`, `icon`,
-`color`, `categories`, `signature`) and the documents. To bring a newer example in:
+The code lives in `src/` (one file per responsibility; `src/plugin.js` only re-exports) and `npm run build` bundles it
+with esbuild into `plugin.js`, the one file Kino installs (the manifest's `entry`). `plugin.js` is generated, committed
+and signed: never edit it by hand. "How the code is organized" below (synced from the example) says which folder owns
+what.
+
+`src/`, `plugin.js` and `test/` are kept in sync with the `watch-party` example of Kino's plugin guide. Kino's repository
+is the source of truth for the code; this repository owns the publishing metadata (`id`, `name`, `version`,
+`description`, `author`, `homepage`, `icon`, `color`, `categories`, `signature`) and the documents. To bring a newer
+example in:
 
 ```sh
 node scripts/sync-from-example.mjs <kino>/docs/plugins/examples/watch-party --dry-run   # what would change
 node scripts/sync-from-example.mjs <kino>/docs/plugins/examples/watch-party
 ```
 
-It copies `plugin.js` (only its first comment line changes), mirrors `test/` with the kit imports pointed at `sdk/`,
-takes the manifest's working fields (`apiVersion`, `entry`, `hosts`, `capabilities`, `panel`...) and never the ones
-listed above, refreshes the Node kit (`sdk/`, `contract.json`, `kino.d.ts`) from the same Kino checkout (`--no-kit` to
-skip), and rewrites the section below. When the code or a working field changed it drops the stale `signature` and tells
-you what comes next.
+It mirrors `src/` (only the entry's first comment line changes), copies the generated `plugin.js` as the example built it
+(the same bytes: `npm run check:built` proves it here), `scripts/build.mjs` and the build part of `package.json` (the
+`build` and `check:built` scripts, esbuild), mirrors `test/` with the kit imports pointed at `sdk/`, takes the manifest's
+working fields and never the ones listed above, refreshes the Node kit (`sdk/`, `contract.json`, `kino.d.ts`) from the
+same Kino checkout (`--no-kit` to skip), and rewrites the section below. When `plugin.js` or a working field changed it
+drops the stale `signature` and tells you what comes next.
 
 ## Testing and signing
 
 ```sh
-npm test            # node --test test/*.test.mjs: the kit's sandbox, its room, a fake network of devices, a fake clock; no network
-npm run validate    # node sdk/validate.mjs . --repo kinotvapp/kino-plugin-watch-party
-npm run sign        # signs plugin.js with the author key (~/.config/kino/kino-author-key.pem, or $KINO_AUTHOR_KEY)
+npm install          # once: esbuild (node_modules/ is ignored)
+npm run build        # src/ -> plugin.js, deterministic: the same sources give the same bytes
+npm run check:built  # fails when plugin.js is not exactly what src/ builds to
+npm test             # node --test test/*.test.mjs: the built plugin.js in the kit's sandbox, plus the check above; no network
+npm run validate     # node sdk/validate.mjs . --repo kinotvapp/kino-plugin-watch-party
+npm run sign         # signs plugin.js with the author key (~/.config/kino/kino-author-key.pem, or $KINO_AUTHOR_KEY)
 ```
 
 Try it by hand with the kit, as a tab contributed to another plugin's title:
@@ -37,14 +46,21 @@ KINO_ROOM_REVOKED=1 node sdk/run.mjs --foreign latino:Latino . panel movie:43863
 KINO_PLAYER_CONTROL_REVOKED=1 node sdk/run.mjs --foreign latino:Latino . panel movie:438631  # no player control
 ```
 
-A new version: sync (or change the code), raise `version` in `kino-plugin.json`, add a `CHANGELOG.md` entry, `npm test`,
-`npm run sign`, `npm run validate`, commit and push. Every change to `plugin.js` or to `version` needs a new signature,
-always with the same key: Kino refuses an update signed by another one.
+A new version, step by step:
+
+1. Change the code in `src/` (or sync it from the example, above). Never edit `plugin.js` by hand.
+2. `npm run build`, then `npm run check:built` and `npm test`.
+3. Raise `version` in `kino-plugin.json` and add a `CHANGELOG.md` entry.
+4. `npm run sign`, then `npm run validate` (it checks the signature too).
+5. Commit `src/`, `plugin.js`, `kino-plugin.json` and `CHANGELOG.md` together, then push.
+
+Every change to `plugin.js` or to `version` needs a new signature, always with the same key: Kino refuses an update
+signed by another one.
 
 ## How it works
 
 <!-- sync:begin example-readme -->
-_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `a97783476`. Do not edit by hand: change the example and sync again._
+_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `efddb7278`. Do not edit by hand: change the example and sync again._
 
 ### What Kino asks the person (the red lines are Kino's)
 
@@ -167,4 +183,42 @@ departure. **Pin the panel** («Fijar»): docked next to the video (the right th
 the video on a phone held upright) the tab keeps running while the video plays, and the layout is one narrow column made
 for it. Pin it for the playback: Kino does not remember the pin, so a new playback starts with the panel closed and
 unpinned. Kino also closes rooms after 5 minutes in the background.
+
+### How the code is organized
+
+The code people read lives in `src/`, one small file per responsibility. Kino installs ONE file, `plugin.js` (the
+manifest's `entry`), so `npm run build` bundles `src/` into it with [esbuild](https://esbuild.github.io/): one readable
+ES module (not minified) with the same named exports, starting with a line that says it is generated. `plugin.js` stays
+committed (Kino installs it straight from the repository, and the signature covers its bytes); **never edit it by hand**:
+edit `src/`, then `npm run build`. `npm run check:built` (and the test `test/built.test.mjs`) fails when `plugin.js` is
+not exactly what `src/` builds to.
+
+```text
+src/
+  plugin.js        the entry: only re-exports the public surface (what Kino calls and what the tests use)
+  limits.js        the plugin's own limits, the eight reactions, the speeds
+  util/            text.js (scrubbing, sizes, an error's code), codes.js (room codes, words, ids, the QR formats)
+  chat/            history.js: the chat every device keeps (merge, trim, ranges, gaps, the rate limit)
+  protocol/        media.js (the title or channel and whether it matches), playback.js (the sync decision),
+                   messages.js (validation of everything a peer sends)
+  invite/          short-code.js (the 5-digit code service), invitation.js (the text to copy and reading it back)
+  party/           state.js (the party, the outbox queue, the snapshot), election.js, host.js and guest.js (the
+                   reducers), failover.js, tv-link.js (the TV's link endpoint), correction.js (following the host)
+  transport/       storage.js (kino.storage), outbox.js (the send budget, the mailboxes, `pump`)
+  i18n/            texts.js: every text with its Spanish base and English twin, the room errors
+  ui/              kit.js (node builders), busy.js, errors.js, banners.js, room-line.js, chat-tab.js, room-tab.js,
+                   link-qr.js, wizard.js, recovery.js, view.js (the whole tab)
+  actions/         act.js (one case per press), join.js (create, join, scan, link), recover.js (failover presses)
+  exports/         panel.js, panel-action.js, kino.js (`panel`, `panelAction`, `playerEvent`)
+```
+
+Imports only go one way (util and limits, then chat, protocol and invite, then party, transport, ui, actions and
+exports): there is no import cycle. Each file starts with a comment that says what it owns.
+
+```sh
+npm install          # once: esbuild
+npm run build        # src/ -> plugin.js
+npm test             # the tests run the built plugin.js in the kit's sandbox, and check it is built from src/
+npm run check:built  # plugin.js is exactly what src/ builds to
+```
 <!-- sync:end example-readme -->

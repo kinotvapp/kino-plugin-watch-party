@@ -92,8 +92,8 @@ export function jobKino(kino, budget, log = () => {}) {
   }
   // Task 8r: kino.ai.ask answers a job with the plugin's own approval, each ask one of the run's requests (PluginAiBridge).
   if (kino.ai) out.ai = Object.freeze({ ask: (options) => kitJobRequest.run(() => budget.takeFetch(), () => kino.ai.ask(options)) });
-  // The sync ones throw at once, as the app's prelude does for a synchronous binding.
-  if ("seed" in kino) out.seed = syncRefused("kino.seed");
+  // The sync ones throw at once, as the app's prelude does for a synchronous binding. kino.seed (Task 18, G2) is allowed: it
+  // keeps the kit's own report of what Kino would send (only with the plugin's telemetry consent).
   if ("sync" in kino) out.sync = Object.freeze({ remoteChanged: syncRefused("kino.sync") });
   return Object.freeze(out);
 }

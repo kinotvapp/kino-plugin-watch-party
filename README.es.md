@@ -202,6 +202,48 @@ Cada permiso en rojo se puede apagar después en la pestaña del plugin en Ajust
 - **La fiesta se detuvo al cerrar el panel**: fija el panel (mira arriba).
 - **«Party Chat necesita las pantallas de plugins activas en Ajustes»**: activa las pantallas de plugins en Ajustes de Kino.
 
+## Cómo está organizado el código
+
+El código que se lee vive en `src/`, un archivo pequeño por responsabilidad. Kino instala UN archivo, `plugin.js` (el
+`entry` del manifiesto), así que `npm run build` empaca `src/` en él con [esbuild](https://esbuild.github.io/): un solo
+módulo ES legible (sin minificar) con las mismas exportaciones, que empieza con una línea que dice que es generado.
+`plugin.js` sigue en el repositorio (Kino lo instala directo de ahí y la firma cubre sus bytes); **nunca lo edites a mano**:
+edita `src/` y corre `npm run build`. `npm run check:built` (y la prueba `test/built.test.mjs`) falla cuando `plugin.js`
+no es exactamente lo que sale de `src/`.
+
+```text
+src/
+  plugin.js        la entrada: solo reexporta la superficie pública (lo que Kino llama y lo que usan las pruebas)
+  limits.js        los límites propios del plugin, las ocho reacciones, las velocidades
+  util/            text.js (limpieza, tamaños, el código de un error), codes.js (códigos, palabras, ids, los QR)
+  chat/            history.js: el chat que guarda cada aparato (unir, recortar, rangos, huecos, el límite de ritmo)
+  protocol/        media.js (el título o canal y si coincide), playback.js (la decisión de sincronía),
+                   messages.js (la validación de todo lo que manda un par)
+  invite/          short-code.js (el servicio de códigos de 5 dígitos), invitation.js (el texto para copiar y leerlo)
+  party/           state.js (la fiesta, la cola de salida, la instantánea), election.js, host.js y guest.js (los
+                   reductores), failover.js, tv-link.js (el enlace del televisor), correction.js (seguir al anfitrión)
+  transport/       storage.js (kino.storage), outbox.js (el presupuesto de envío, los buzones, `pump`)
+  i18n/            texts.js: cada texto con su base en español y su gemelo en inglés, los errores de la sala
+  ui/              kit.js (constructores de nodos), busy.js, errors.js, banners.js, room-line.js, chat-tab.js,
+                   room-tab.js, link-qr.js, wizard.js, recovery.js, view.js (la pestaña completa)
+  actions/         act.js (un caso por pulsación), join.js (crear, entrar, escanear, vincular), recover.js (el relevo)
+  exports/         panel.js, panel-action.js, kino.js (`panel`, `panelAction`, `playerEvent`)
+```
+
+Las importaciones van en un solo sentido (util y limits, luego chat, protocol e invite, luego party, transport, ui,
+actions y exports): no hay ciclos. Cada archivo empieza con un comentario que dice de qué se encarga.
+
+```sh
+npm install          # una vez: esbuild
+npm run build        # src/ -> plugin.js (nunca edites plugin.js a mano)
+npm run check:built  # plugin.js es exactamente lo que sale de src/
+npm test             # el plugin.js generado en la caja de arena del kit, y la revisión de arriba
+npm run validate     # lo que diría Kino al instalarlo
+npm run sign         # después de cada build que cambió plugin.js (la llave del autor, nunca en este repositorio)
+```
+
+El flujo completo está en [DEVELOPERS.md](DEVELOPERS.md) (en inglés).
+
 ## Licencia
 
 [Apache License 2.0](LICENSE). Ver [NOTICE](NOTICE).

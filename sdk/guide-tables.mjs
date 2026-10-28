@@ -42,11 +42,19 @@ const WIDGET_TEXT = {
   accordion: "sections that open and close (`key`, `items`, `multiple`)", skeleton: "a placeholder while something loads",
   qr: "a QR code Kino draws on the device (`value`)", stepper: "a number drawn `[ − ] value [ + ]` (`min`, `max`, `step`, `decimals`, `editable`)",
   table: "a table of `TableRow`s holding `TableCell`s (`text` or `children`, `colSpan`, `crossAxisAlignment`)",
+  fab: "Kino's floating button over the screen's bottom (`icon`, `labelText`, `onPressed`), one per screen",
+  listTile: "one row of a list: `leading`, `title`, `subtitle`, `trailing`, one press",
+  avatar: "a circle with a picture, initials or an icon (`image`, `text`, `icon`, `backgroundColor`)",
+  scaffold: "a screen's root with an `appBar`, a `body`, a `floatingActionButton` and a `bottomNavigationBar` (drawn in layout fill)",
+  appBar: "a Scaffold's top bar: `title`, `leading`, up to four `actions`, a `bottom` TabBar",
+  navigationBar: "a Scaffold's bottom bar of 2 to 5 `items` (`value`, `onChanged`)",
+  pageView: "pages swiped across with Kino's dots (`initialPage`, `onPageChanged`, `autoPlayMs`); `viewportFraction` < 1 is a carousel",
 };
 /** Properties a widget takes besides the ones contract.json lists in layoutProps (the d.ts has the rest). */
 const WIDGET_PROPS = {
   list: ["onEndReached", "loadingMore", "done", S.listHints.field], titleRail: ["onEndReached", "loadingMore", "done"], titleGrid: ["onEndReached", "loadingMore", "done"],
   popup: ["onClose", "buttons", "items", S.declaredPopups.anchor.field], text: [S.textTime.field, S.textTime.formatField],
+  pageView: ["initialPage", "onPageChanged", "autoPlayMs"], avatar: ["backgroundColor"], listTile: ["leading", "trailing", "subtitle"],
 };
 const GO_TEXT = {
   title: "this plugin's title page (`ref`, `kind`; `id`, `title` and `adult` for a title that is not on the canvas)",
@@ -153,6 +161,16 @@ export const TABLES = {
       span: `1 to ${S.limits.gridColumns} or \`"auto"\`, in a \`Row\` with \`wrap: true\``,
       offset: `0 to ${S.limits.gridColumns - 1}, in a \`Row\` with \`wrap: true\``,
       maxWidthFraction: `${S.maxWidthFraction.min} to ${S.maxWidthFraction.max} in steps of ${S.maxWidthFraction.step}: at most that share of the parent's width (exactly, with \`fill\`)`,
+      // Task 17.
+      alignSelf: "`start`, `center`, `end`, `stretch`: this child across its `Row` or `Column` ([ui.md](ui.md#box-props))",
+      textAlign: `${S.boxProps.textAligns.map((x) => `\`${x}\``).join(", ")}: a text's paragraph`,
+      border: `\`{ width?, color? }\` on a box: 0 to ${S.boxProps.border.maxWidth} dp, a colour role`,
+      elevation: `0 to ${S.boxProps.maxElevation} on a \`Card\` or a \`Stack\`: Kino's shadow`,
+      background: "a colour role: a box's fill",
+      minWidth: S.sizeScale.join(", "), maxWidth: S.sizeScale.join(", "), maxHeight: S.sizeScale.join(", "),
+      positioned: "`{ top?, left?, right?, bottom?, width?, height? }` on a `Stack` child, dp or `\"25%\"` ([ui.md](ui.md#positioned))",
+      opacity: "0 to 1 ([ui.md](ui.md#animate))",
+      animate: "`{ duration?, curve? }`: changes glide ([ui.md](ui.md#animate))",
     }[p] || "see `kino.d.ts`";
     const name = canon(p);
     return [`\`${name}\``, name === p ? "" : `\`${p}\``, values];

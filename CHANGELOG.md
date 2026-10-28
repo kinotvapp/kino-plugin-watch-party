@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- `plugin.js` is now generated from `src/`, same behaviour: the code is split into small files by responsibility under `src/` and `npm run build` (esbuild) bundles them into the one file Kino installs. `npm run check:built` proves the shipped file is built from the source.
+
 ## 1.1.0
 
 - **New name: Party Chat** (it was Fiesta / Party). The id `watch-party` and this repository stay the same, so an

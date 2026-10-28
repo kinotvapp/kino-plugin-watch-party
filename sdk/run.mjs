@@ -1097,8 +1097,9 @@ async function jobCommand(targetArg, rest, opts) {
   const checked = validateManifest(manifestText);
   if (!checked.ok) return fail(`kino-plugin.json: ${checked.field}: ${checked.message}`);
   const manifest = checked.manifest;
-  if (!(manifest.apiVersion >= J.apiVersion && manifest.capabilities.includes(J.capability) && (manifest.jobs || []).length)) {
-    return fail(`job needs the "${J.capability}" capability and a "${J.manifest.field}" list at apiVersion ${J.apiVersion} in kino-plugin.json`);
+  // Task 18 (G1): an older apiVersion's `schedule` and `jobs` added by an apiVersion 14 enhancement count (featureApiVersion).
+  if (!(featureApiVersion(manifest) >= J.apiVersion && manifest.capabilities.includes(J.capability) && (manifest.jobs || []).length)) {
+    return fail(`job needs the "${J.capability}" capability and a "${J.manifest.field}" list at apiVersion ${J.apiVersion} (or in an "enhancements" block for it) in kino-plugin.json`);
   }
   const [idArg, reasonArg] = rest;
   const job = idArg === undefined ? manifest.jobs[0] : manifest.jobs.find((j) => j.id === idArg);

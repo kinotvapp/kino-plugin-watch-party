@@ -1,7 +1,7 @@
 {
   "id": "watch-party",
   "name": "Party Chat",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "apiVersion": 14,
   "entry": "plugin.js",
   "description": "Mira un título con tus amigos, cada quien en su aparato: una pestaña en el reproductor con chat, reacciones y el video sincronizado. Entra con un código de 5 números o con su QR. (Party Chat: watch a title together, with a chat and the video in sync.)",
@@ -33,6 +33,6 @@
   },
   "signature": {
     "authorKey": "82b87b938e0a95b142467c815a8823cb54310a13a828c3c4c77b1eda43294ae6",
-    "value": "93ef1266d5c936eeed4f3b8d3e28f3a8aa2591e8ba7e463f3734372438e44eb4f7346187d8526be19f4d5dae3266a32c594a26bde9b560846b1ddc50a454e20a"
+    "value": "0775cc88f5bba94544f3d0c3f910bc6b4cedc13539cbf2faae0a92d8bfdfaf2241d901998c8628079101db048994e34b08c2b2b0b51611baeaf3ab32cc15a50d"
   }
 }

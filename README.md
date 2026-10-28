@@ -195,6 +195,48 @@ Each red permission can be switched off later in the plugin's tab in Kino's Sett
 - **The party stopped when I closed the panel**: pin the panel (see above).
 - **"Party Chat needs plugin screens switched on in Settings"**: turn plugin screens on in Kino's Settings.
 
+## How the code is organized
+
+The code people read lives in `src/`, one small file per responsibility. Kino installs ONE file, `plugin.js` (the
+manifest's `entry`), so `npm run build` bundles `src/` into it with [esbuild](https://esbuild.github.io/): one readable
+ES module (not minified) with the same named exports, starting with a line that says it is generated. `plugin.js` stays
+committed (Kino installs it straight from the repository, and the signature covers its bytes); **never edit it by hand**:
+edit `src/`, then `npm run build`. `npm run check:built` (and the test `test/built.test.mjs`) fails when `plugin.js` is
+not exactly what `src/` builds to.
+
+```text
+src/
+  plugin.js        the entry: only re-exports the public surface (what Kino calls and what the tests use)
+  limits.js        the plugin's own limits, the eight reactions, the speeds
+  util/            text.js (scrubbing, sizes, an error's code), codes.js (room codes, words, ids, the QR formats)
+  chat/            history.js: the chat every device keeps (merge, trim, ranges, gaps, the rate limit)
+  protocol/        media.js (the title or channel and whether it matches), playback.js (the sync decision),
+                   messages.js (validation of everything a peer sends)
+  invite/          short-code.js (the 5-digit code service), invitation.js (the text to copy and reading it back)
+  party/           state.js (the party, the outbox queue, the snapshot), election.js, host.js and guest.js (the
+                   reducers), failover.js, tv-link.js (the TV's link endpoint), correction.js (following the host)
+  transport/       storage.js (kino.storage), outbox.js (the send budget, the mailboxes, `pump`)
+  i18n/            texts.js: every text with its Spanish base and English twin, the room errors
+  ui/              kit.js (node builders), busy.js, errors.js, banners.js, room-line.js, chat-tab.js, room-tab.js,
+                   link-qr.js, wizard.js, recovery.js, view.js (the whole tab)
+  actions/         act.js (one case per press), join.js (create, join, scan, link), recover.js (failover presses)
+  exports/         panel.js, panel-action.js, kino.js (`panel`, `panelAction`, `playerEvent`)
+```
+
+Imports only go one way (util and limits, then chat, protocol and invite, then party, transport, ui, actions and
+exports): there is no import cycle. Each file starts with a comment that says what it owns.
+
+```sh
+npm install          # once: esbuild
+npm run build        # src/ -> plugin.js (never edit plugin.js by hand)
+npm run check:built  # plugin.js is exactly what src/ builds to
+npm test             # the built plugin.js in the kit's sandbox, and the check above
+npm run validate     # what Kino would say at install
+npm run sign         # after every build that changed plugin.js (the author key, never in this repository)
+```
+
+The full workflow is in [DEVELOPERS.md](DEVELOPERS.md).
+
 ## License
 
 [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).

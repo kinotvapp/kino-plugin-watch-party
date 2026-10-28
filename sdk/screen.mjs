@@ -25,7 +25,9 @@ const RESERVED_EVENT = "open";
 const GO_KEYS = contract.manifest.screen.goShapes;
 /** Why a `go.title` / `go.play` `id` is dropped (PluginScreenOutput.GO_BAD_ID). */
 const GO_BAD_ID = "id must be 1 to 128 of A-Z a-z 0-9 . _ ~ -";
-const ACTION_KEYS = ["ui", "event", "arg", "go"];
+const ACTION_KEYS = ["ui", "event", "arg", "go", "timeoutMs"];
+/** Task 18 (G6): the action fields that are a press of the person's, where an action's own timeoutMs is read. */
+const PRESS_FIELDS = ["onTap", "onLongPress", "onSubmit", "onTrailingTap"];
 /** Every field a screen answer may carry (ScreenLimits.ANSWER_FIELDS); `ui` since Task 7i-2. */
 const ANSWER_KEYS = S.answerFields;
 /** A declared pop-up's `onClose` (Task 7i-2): ScreenLimits.POPUP_ON_CLOSE. */
@@ -154,7 +156,7 @@ export function normalizeNode(o, log) {
     }
   }
   for (const [canonical, alias] of Object.entries(ALIASES.props)) moveProp(copy, canonical, alias, name, log);
-  if (type === BUTTON) for (const [canonical, alias] of Object.entries(ALIASES.buttonProps)) moveProp(copy, canonical, alias, name, log);
+  if ((ALIASES.buttonPropTypes ?? [BUTTON]).includes(type)) for (const [canonical, alias] of Object.entries(ALIASES.buttonProps)) moveProp(copy, canonical, alias, name, log);
   else for (const canonical of Object.keys(ALIASES.buttonProps)) if (present(copy, canonical)) log(`screen: ${name} ${canonical} works only on a button, ignored`);
   if (type === TABLE) {
     const cols = aliasColumns(opt(copy, "columns"), log);
@@ -494,13 +496,66 @@ class Reader {
     const parent = this.childOf ?? null;
     this.childOf = null;
     const outerParent = this.parentType ?? null;
+    // Task 17 item G: the Scaffold slot whose node is being read.
+    const slot = this.slotOf ?? null;
+    this.slotOf = null;
+    const outerSlot = this.mySlot ?? null;
     try {
       this.parentType = parent;
+      this.mySlot = slot;
       return this.nodeIn(written, depth);
     } finally {
       this.childOf = parent;
       this.parentType = outerParent;
+      this.slotOf = slot;
+      this.mySlot = outerSlot;
     }
+  }
+
+  /** PluginScreenOutput.scaffoldSlot (Task 17 item G): one of a Scaffold's slots, read as that slot. */
+  scaffoldSlot(o, slot, depth) {
+    const raw = opt(o, slot);
+    if (absent(raw)) return null;
+    if (!isObj(raw)) { this.log(`screen: scaffold ${slot} is not a node, dropped`); return null; }
+    const want = S.scaffold.slotTypes[slot] ?? null;
+    const written = typeof raw.type === "string" ? raw.type : null;
+    const type = written !== null && has(ALIASES.types, written) ? ALIASES.types[written] : written;
+    if (want !== null && type !== want) {
+      const flutter = Object.entries(ALIASES.types).find(([, v]) => v === want)[0];
+      this.log(`screen: scaffold ${slot} must be ${flutter}, dropped`);
+      return null;
+    }
+    this.slotOf = slot;
+    try { return this.node(raw, depth + 1); } finally { this.slotOf = null; }
+  }
+
+  /** PluginScreenOutput.barButton (Task 17 item G): an AppBar's leading or action: an IconButton with a labelText. */
+  barButton(raw, where, depth) {
+    if (absent(raw)) return null;
+    const j = isObj(raw) ? normalizeNode(raw, () => {}) : null;
+    if (j === null || opt(j, "type") !== "button" || opt(j, "variant") !== "icon") { this.log(`screen: appBar ${where} must be an IconButton, dropped`); return null; }
+    if (this.text(j, "label") === "") { this.log(`screen: appBar ${where} needs a labelText (what a screen reader says), dropped`); return null; }
+    return this.node(raw, depth + 1);
+  }
+
+  /** PluginScreenOutput.navItems (Task 17 item G): a NavigationBar's items. */
+  navItems(raw) {
+    if (!Array.isArray(raw)) return [];
+    const G = S.scaffold;
+    let n = raw.length;
+    if (n > G.maxNavItems) { n = G.maxNavItems; this.log(`screen: navigationBar keeps ${G.maxNavItems} items, the rest dropped`); }
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const e = isObj(raw[i]) ? normalizeNode(raw[i], () => {}) : null;
+      const key = e !== null && typeof e.key === "string" && ID.test(e.key) ? e.key : null;
+      const icon = e !== null && typeof e.icon === "string" && ICONS.includes(e.icon) ? e.icon : null;
+      const label = e !== null ? this.text(e, "label") : "";
+      if (e === null || key === null || icon === null || label === "") { this.log(`screen: navigationBar item ${i} needs a key, an icon and a label, dropped`); continue; }
+      if (out.some((x) => x.key === key)) { this.log(`screen: navigationBar item ${i} repeats key "${key}", dropped`); continue; }
+      const badge = present(e, "badge") ? badgeOf(e.badge, this.lang, `screen: navigationBar item ${i}`, this.log) : null;
+      out.push({ key, icon, label, badge });
+    }
+    return out;
   }
 
   nodeIn(written, depth) {
@@ -580,13 +635,29 @@ class Reader {
       this.keys.add(key);
     }
     const enabled = opt(o, "enabled") !== false;
-    const hidden = opt(o, "hidden") === true;
     const t = opt(o, "testKey");
     const testKey = typeof t === "string" && t !== "" && t.length <= LIMITS.maxTestKeyChars ? t : null;
     if (testKey === null && present(o, "testKey")) this.log(`screen: ${type} testKey is not a string of 1 to ${LIMITS.maxTestKeyChars} characters, dropped`);
+    // Task 17: Flutter's `visible: false` hides it as `hidden: true` does.
+    let visible = true;
+    if (present(o, "visible")) {
+      if (typeof o.visible === "boolean") visible = o.visible;
+      else this.log(`screen: ${type} visible ${fmt(o.visible)} is not true or false, ignored`);
+    }
+    const hidden = opt(o, "hidden") === true || !visible;
     // Task 15: the properties a family of nodes shares (never per size: a map there was dropped above, logged).
     const shared = this.sharedProps(o, type, passes[0][1], maps);
-    const common = (p, byClass) => ({ key, enabled, hidden, style: p.style, onTap: p.onTap, onLongPress: p.onLongPress, devices, sizes, testKey, byClass, ...shared });
+    // Task 17: at most maxAnimated animating nodes a screen; the rest drop their animate.
+    let still = false;
+    if (passes.some((p) => p[1].style.animate !== null)) {
+      this.animated = this.animated ?? 0;
+      if (this.animated < S.motion.maxAnimated) this.animated++;
+      else {
+        still = true;
+        if (!this.animatedLogged) { this.animatedLogged = true; this.log(`screen: more than ${S.motion.maxAnimated} animating nodes, the rest drop their animate`); }
+      }
+    }
+    const common = (p, byClass) => ({ key, enabled, hidden, style: still ? { ...p.style, animate: null } : p.style, onTap: p.onTap, onLongPress: p.onLongPress, devices, sizes, testKey, byClass, ...shared });
     const byClass = {};
     if (maps !== null) for (const [cls, p] of passes) byClass[cls] = node(type, p.build(false, key), common(p, {}));
     const base = passes[0][1];
@@ -602,7 +673,8 @@ class Reader {
   sharedProps(o, type, base, maps) {
     const SH = S.sharedProps;
     const given = (name) => present(o, name) && !(maps !== null && maps.has(name));
-    const pressable = type === "button" || (type === "card" && base.onTap !== null);
+    // Task 17: a FloatingActionButton too, and a ListTile with an onTap.
+    const pressable = type === "button" || type === "fab" || ((type === "card" || type === "listTile") && base.onTap !== null);
     let autofocus = false;
     if (given("autofocus")) {
       const v = o.autofocus;
@@ -616,7 +688,7 @@ class Reader {
     const onPressable = (name) => {
       if (pressable) return true;
       if (type === "chips" || type === "tabs") this.log(`screen: ${type} ${name} is not read: its value says which is picked, ignored`);
-      else if (type === "card") this.log(`screen: card ${name} needs an onTap, ignored`);
+      else if (type === "card" || type === "listTile") this.log(`screen: ${type} ${name} needs an onTap, ignored`);
       else this.log(`screen: ${type} ${name} works only on a button or a card with onTap, ignored`);
       return false;
     };
@@ -628,7 +700,34 @@ class Reader {
     }
     let badge = null;
     if (given("badge") && onPressable("badge")) badge = badgeOf(o.badge, this.lang, `screen: ${type}`, this.log);
-    return { autofocus, selected, badge };
+    // Task 17: `tooltip` (and `tooltipEn`) on a node that does something: Kino's hint, never essential information.
+    let tooltip = null;
+    const TT = S.tooltip;
+    if (given(TT.field)) {
+      const raw = o[TT.field];
+      const text = kotlinTrim(localized(o, TT.field, this.lang));
+      const actionable = type !== "qr" && (SH.focusableWidgets.includes(type) || base.onTap !== null || base.onLongPress !== null);
+      if (typeof raw !== "string") this.log(`screen: ${type} tooltip ${fmt(raw)} is not a text, ignored`);
+      else if (text === "") { /* none */ }
+      else if (!actionable) this.log(`screen: ${type} tooltip works only on a node that does something (a press or a field), ignored`);
+      else if (text.length > TT.maxChars) { this.log(`screen: ${type} tooltip is over ${TT.maxChars} characters, cut`); tooltip = text.slice(0, TT.maxChars); }
+      else tooltip = text;
+    }
+    // Task 18 (G7): loading on a pressable: Kino's busy look, no press (kept on the node only when true).
+    let loading = false;
+    if (given(S.pressBudget.loadingField)) {
+      const v = o[S.pressBudget.loadingField];
+      if (typeof v !== "boolean") this.log(`screen: ${type} loading ${fmt(v)} is not true or false, ignored`);
+      else if (onPressable(S.pressBudget.loadingField)) loading = v;
+    }
+    // Task 18 (G10): enabledAt on a pressable: off until that time (kept on the node only when given).
+    let enabledAt = null;
+    if (given(S.enabledAt.field)) {
+      const v = o[S.enabledAt.field];
+      if (!(typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= S.textTime.maxMs)) this.log(`screen: ${type} enabledAt ${fmt(v)} is not a time in ms since 1970, ignored`);
+      else if (onPressable(S.enabledAt.field)) enabledAt = v;
+    }
+    return { autofocus, selected, badge, tooltip, ...(loading ? { loading } : {}), ...(enabledAt !== null ? { enabledAt } : {}) };
   }
 
   /** What one pass over a node's own fields read: the style, the actions and the widget's builder. */
@@ -645,6 +744,12 @@ class Reader {
       style = { ...style, span: null, offset: null };
     }
     // An image's fallback is never pressed: the image (or what holds it) takes the press.
+    // Task 17: nor is a ListTile's leading or trailing: the tile takes the press.
+    if (!(this.inFallback > 0) && this.inSlot > 0 && (present(o, "onTap") || present(o, "onLongPress"))) {
+      this.log(`screen: ${type} actions inside a ListTile's leading or trailing, ignored (the tile takes the press)`);
+      const plain = this.widget(o, type, depth, drop);
+      return plain === null ? null : { style, onTap: null, onLongPress: null, build: plain };
+    }
     if (this.inFallback > 0 && (present(o, "onTap") || present(o, "onLongPress"))) {
       this.log(`screen: ${type} actions inside an image's fallback, ignored`);
       const plain = this.widget(o, type, depth, drop);
@@ -842,7 +947,7 @@ class Reader {
         // Task 15: Kino's «↓ Nuevos» chip while new items wait below.
         const newItemsHint = this.flag(o, type, S.listHints.field);
         return (k) => {
-          const items = k ? this.flatWhile(false, () => this.children(o, depth, "items", LIMITS.maxListItems)) : [];
+          const items = k ? this.flatWhile(false, () => this.counted("inRepeat", () => this.children(o, depth, "items", LIMITS.maxListItems))) : [];
           let empty = null;
           if (k) {
             const e = opt(o, "empty");
@@ -1034,7 +1139,7 @@ class Reader {
         if (title === "" && !(Array.isArray(children) && children.length > 0)) return fail("has neither a title nor a body");
         const buttons = kind === "dialog" ? this.buttons(opt(o, "buttons")) : [];
         // A pop-up's body is drawn over the canvas, outside any form around the pop-up.
-        return (k) => ({ kind, title, children: k ? this.flatWhile(false, () => this.inForm(null, () => this.children(o, depth))) : [], buttons, items: [], onClose, anchor });
+        return (k) => ({ kind, title, children: k ? this.flatWhile(false, () => this.inForm(null, () => this.counted("inPopupBody", () => this.children(o, depth)))) : [], buttons, items: [], onClose, anchor });
       }
       case FORM: {
         const onSubmit = this.actions(opt(o, "onSubmit"), o, type, "onSubmit");
@@ -1129,13 +1234,182 @@ class Reader {
         const picked = this.settingsKeys(o);
         if (picked === null) return null;
         const keys = picked.keys;
+        // Task 18 (G11): its toggles and selects save on change (kept on the node only when true).
+        const autoSave = this.flag(o, type, S.settingsAutoSave.field);
         return (k) => {
           if (k) { if (keys === null) this.allSettingsShown = true; else keys.forEach((x) => this.shownSettings.add(x)); }
-          return { keys };
+          return autoSave ? { keys, autoSave } : { keys };
         };
+      }
+      // ---- Task 17 (PluginScreenOutput's FAB, LIST_TILE, AVATAR, PAGE_VIEW) ----
+      case "fab": {
+        const F = S.flutterNodes;
+        if (this.inCell > 0 || this.inFallback > 0 || this.answerBody > 0 || (this.inPopupBody ?? 0) > 0 || (this.inRepeat ?? 0) > 0 || (this.inSlot ?? 0) > 0) {
+          return fail("is drawn by Kino over the screen: never inside a list, a table, a pop-up, a ListTile or an image's fallback");
+        }
+        if ((this.fabs ?? 0) >= F.maxFabs) return fail("is one per screen (another came first)");
+        const icon = this.iconOf(o, type);
+        if (icon === null) return fail("needs an icon");
+        if (!present(o, "onTap")) return fail("needs an onPressed");
+        const position = this.enumOf(o, type, "fabPosition", F.fabPositions, F.fabPositions[0]);
+        return (k) => { if (k) this.fabs = (this.fabs ?? 0) + 1; return { icon, label, position }; };
+      }
+      case "listTile": {
+        const title = t("title");
+        if (title === "") return fail("needs a title");
+        const subtitle = t("subtitle");
+        const dense = this.flag(o, type, "dense");
+        return (k) => ({ title, subtitle, leading: k ? this.tileSlot(o, "leading", depth) : null, trailing: k ? this.tileSlot(o, "trailing", depth) : null, dense });
+      }
+      case "avatar": {
+        const F = S.flutterNodes;
+        let image = "";
+        if (present(o, "image")) {
+          image = httpsImage({ url: typeof o.image === "string" ? o.image : "" }, []) || "";
+          if (image === "") this.log("screen: avatar image is not https on a public host, its initials drawn");
+        }
+        let text = t("text");
+        if (text.length > F.avatarMaxTextChars) { text = text.slice(0, F.avatarMaxTextChars); this.log(`screen: avatar text is over ${F.avatarMaxTextChars} characters, cut`); }
+        const icon = this.iconOf(o, type);
+        const lo = F.avatarMinRadius, hi = F.avatarMaxRadius;
+        let radius = F.avatarDefaultRadius;
+        if (present(o, "radius")) {
+          const v = o.radius;
+          if (typeof v === "number" && Number.isFinite(v)) {
+            radius = Math.round(Math.min(hi, Math.max(lo, v)));
+            if (v < lo || v > hi) this.log(`screen: avatar radius ${fmt(v)} is outside ${lo}..${hi}, clamped`);
+          } else this.log(`screen: avatar radius ${fmt(v)} is not a number, the default used`);
+        }
+        let background = null;
+        if (present(o, "backgroundColor")) {
+          if (typeof o.backgroundColor === "string" && S.colorRoles.includes(o.backgroundColor)) background = o.backgroundColor;
+          else this.log(`screen: avatar backgroundColor ${fmt(o.backgroundColor)} is not a color role, the default used`);
+        }
+        return () => ({ image, text, icon, radius, background, label });
+      }
+      case "pageView": {
+        const F = S.flutterNodes;
+        // A page view scrolls across: never inside something that already does (a sideways scroll, a table cell).
+        if (this.across > 0) return fail("inside a sideways scroll or a table cell");
+        const onPageChanged = this.actions(opt(o, "onPageChanged"), o, type, "onPageChanged");
+        let autoPlayMs = null;
+        if (present(o, "autoPlayMs")) {
+          const v = o.autoPlayMs;
+          if (!(typeof v === "number" && Number.isFinite(v))) this.log(`screen: pageView autoPlayMs ${fmt(v)} is not a number, dropped`);
+          else if (v < F.autoPlayMinMs) { autoPlayMs = F.autoPlayMinMs; this.log(`screen: pageView autoPlayMs ${fmt(v)} is below ${F.autoPlayMinMs}, raised to ${F.autoPlayMinMs}`); }
+          else if (v > F.autoPlayMaxMs) { autoPlayMs = F.autoPlayMaxMs; this.log(`screen: pageView autoPlayMs ${fmt(v)} is above ${F.autoPlayMaxMs}, lowered to ${F.autoPlayMaxMs}`); }
+          else autoPlayMs = Math.floor(v);
+        }
+        let viewportFraction = 1;
+        if (present(o, "viewportFraction")) {
+          const v = o.viewportFraction;
+          if (!(typeof v === "number" && Number.isFinite(v))) this.log(`screen: pageView viewportFraction ${fmt(v)} is not a number, 1 used`);
+          else {
+            viewportFraction = Math.min(1, Math.max(F.viewportFractionMin, v));
+            if (viewportFraction !== v) this.log(`screen: pageView viewportFraction ${fmt(v)} is outside 0.3..1, clamped`);
+          }
+        }
+        let padEnds = true;
+        if (present(o, "padEnds")) {
+          if (typeof o.padEnds === "boolean") padEnds = o.padEnds;
+          else this.log(`screen: pageView padEnds ${fmt(o.padEnds)} is not true or false, ignored`);
+        }
+        const initial = present(o, "initialPage") ? this.intOrNull(o, type, "initialPage", 0, INT_MAX) ?? 0 : 0;
+        return (k) => {
+          const pages = k ? this.children(o, depth, "children", F.maxPages) : [];
+          if (k && pages.length === 0) this.log("screen: pageView has no pages, nothing drawn");
+          let initialPage = 0;
+          if (pages.length > 0) {
+            initialPage = Math.min(initial, pages.length - 1);
+            if (k && initialPage !== initial) this.log(`screen: pageView initialPage ${initial} is past its last page, ${pages.length - 1} used`);
+          }
+          return { pages, initialPage, onPageChanged, autoPlayMs, viewportFraction, padEnds };
+        };
+      }
+      // ---- Task 17 item G ----
+      case "scaffold": {
+        if (depth !== 1 || this.answerBody > 0) return fail("only as the root of a screen or a panel");
+        if (!isObj(opt(o, "body"))) return fail("needs a body");
+        if (has(o, "children")) this.log("screen: scaffold takes body, not children, ignored");
+        return (k) => (k
+          ? { appBar: this.scaffoldSlot(o, "appBar", depth), body: this.scaffoldSlot(o, "body", depth), fab: this.scaffoldSlot(o, "floatingActionButton", depth), bottomBar: this.scaffoldSlot(o, "bottomNavigationBar", depth) }
+          : { appBar: null, body: null, fab: null, bottomBar: null });
+      }
+      case "appBar": {
+        if (this.mySlot !== "appBar") return fail("only as a Scaffold's appBar");
+        const title = t("title");
+        const centerTitle = this.flag(o, type, "centerTitle");
+        let background = null;
+        if (present(o, "backgroundColor")) {
+          if (typeof o.backgroundColor === "string" && S.colorRoles.includes(o.backgroundColor)) background = o.backgroundColor;
+          else this.log(`screen: appBar backgroundColor ${fmt(o.backgroundColor)} is not a color role, the default used`);
+        }
+        return (k) => {
+          if (!k) return { title, leading: null, actions: [], bottom: null, centerTitle, background };
+          const leading = this.barButton(opt(o, "leading"), "leading", depth);
+          const actions = [];
+          const raw = opt(o, "actions");
+          if (!absent(raw)) {
+            if (!Array.isArray(raw)) this.log("screen: appBar actions is not an array, dropped");
+            else {
+              const max = S.scaffold.maxAppBarActions;
+              if (raw.length > max) this.log(`screen: appBar keeps ${max} actions, the rest dropped`);
+              for (let i = 0; i < Math.min(raw.length, max); i++) { const b = this.barButton(raw[i], `action ${i}`, depth); if (b !== null) actions.push(b); }
+            }
+          }
+          let bottom = null;
+          const b = opt(o, "bottom");
+          if (!absent(b)) {
+            const bt = isObj(b) && typeof b.type === "string" ? (has(ALIASES.types, b.type) ? ALIASES.types[b.type] : b.type) : null;
+            if (bt !== "tabs") this.log("screen: appBar bottom must be a TabBar, dropped");
+            else bottom = this.node(b, depth + 1);
+          }
+          return { title, leading, actions, bottom, centerTitle, background };
+        };
+      }
+      case "navigationBar": {
+        const G = S.scaffold;
+        if (this.mySlot !== "bottomNavigationBar") return fail("only as a Scaffold's bottomNavigationBar");
+        const items = this.navItems(opt(o, "items"));
+        if (items.length < G.minNavItems) return fail(`needs ${G.minNavItems} to ${G.maxNavItems} valid items`);
+        let value = items[0].key;
+        const v = opt(o, "value");
+        if (!absent(v)) {
+          if (typeof v === "string" && items.some((x) => x.key === v)) value = v;
+          else this.log(`screen: navigationBar value ${fmt(v)} names no item, the first used`);
+        } else if (present(o, "selectedIndex")) {
+          const i = o.selectedIndex;
+          if (typeof i === "number" && Number.isFinite(i) && i === Math.floor(i) && i >= 0 && i < items.length) value = items[i].key;
+          else this.log(`screen: navigationBar selectedIndex ${fmt(i)} names no item, the first used`);
+        }
+        const onChange = this.actions(opt(o, "onChange"), o, type, "onChange");
+        return () => ({ items, value, onChange });
       }
       default: return fail("is not read by this Kino");
     }
+  }
+
+  /** [read] with the counter [name] (inRepeat, inPopupBody, inSlot) raised. */
+  counted(name, read) {
+    this[name] = (this[name] ?? 0) + 1;
+    try { return read(); } finally { this[name]--; }
+  }
+
+  /**
+   * PluginScreenOutput.tileSlot (Task 17): a ListTile's `leading` or `trailing`: one node of tileSlotWidgets (else dropped,
+   * logged), never pressed itself.
+   */
+  tileSlot(o, slot, depth) {
+    const raw = opt(o, slot);
+    if (absent(raw)) return null;
+    if (!isObj(raw)) { this.log(`screen: listTile ${slot} is not a node, dropped`); return null; }
+    const written = typeof raw.type === "string" ? raw.type : null;
+    const type = written !== null && has(ALIASES.types, written) ? ALIASES.types[written] : written;
+    if (!S.flutterNodes.tileSlotWidgets.includes(type)) {
+      this.log(`screen: listTile ${slot} must be an Icon, a CircleAvatar, an Image, a Badge, a Text or a spinner, dropped`);
+      return null;
+    }
+    return this.counted("inSlot", () => this.node(raw, depth + 1));
   }
 
   /** PluginScreenOutput.spend: one node of the budget for an accordion item's header; false (logged once) when it ran out. */
@@ -1351,7 +1625,9 @@ class Reader {
     // Not in this version: a stepper holds no setting.
     let bind;
     if (type === STEPPER) { bind = null; if (present(o, "bind")) this.log("screen: stepper does not take bind, ignored"); } else bind = this.bindOf(o, type);
-    const withBind = (f) => (bind === null ? f : { ...f, bind });
+    // Task 18 (G8): the plugin's own verdict under the field, on every input (kept on the field only when given).
+    const force = this.forceErrorOf(o, type);
+    const withBind = (f) => { const g = bind === null ? f : { ...f, bind }; return force === null ? g : { ...g, forceError: force }; };
     const none = { required: false, minLength: null, maxLength: null, pattern: null, errorText: null };
     if (takes.length === 0) return withBind(none);
     let required = false;
@@ -1383,6 +1659,19 @@ class Reader {
     }
     const errorText = takes.includes("errorText") ? (this.text(o, "errorText") || null) : null;
     return withBind({ required, minLength: min, maxLength: max, pattern, errorText });
+  }
+
+  /** PluginScreenOutput.forceErrorOf (Task 18, G8): an input's forceErrorText (forceErrorTextEn), cut at maxChars (logged); else ignored, logged. */
+  forceErrorOf(o, type) {
+    const F = S.forceError;
+    const raw = opt(o, F.field);
+    if (absent(raw)) return null;
+    if (typeof raw !== "string") { this.log(`screen: ${type} forceErrorText ${fmt(raw)} is not a text, ignored`); return null; }
+    const t = kotlinTrim(localized(o, F.field, this.lang));
+    if (t === "") return null;
+    if (t.length <= F.maxChars) return t;
+    this.log(`screen: ${type} forceErrorText is over ${F.maxChars} characters, cut`);
+    return t.slice(0, F.maxChars);
   }
 
   cardSize(o, type) { return this.enumOf(o, type, "size", S.cardSizes, "medium"); }
@@ -1612,7 +1901,7 @@ class Reader {
 
   // ---- style ----
 
-  style(o, type) {
+  style(o, type, depth) {
     const scaled = (raw, name, scale, what) => {
       if (typeof raw === "number" && Number.isFinite(raw) && raw === Math.floor(raw) && scale.includes(raw)) return raw === 0 ? 0 : raw;
       this.log(`screen: ${type} ${name} ${fmt(raw)} is off the ${what} scale, dropped`);
@@ -1640,14 +1929,15 @@ class Reader {
     };
     const size = (name) => (present(o, name) ? scaled(o[name], name, S.sizeScale, "size") : null);
     const radius = () => {
-      if (!present(o, "radius") || isObj(o.radius)) return null;
+      // Task 17: a CircleAvatar's `radius` is its own (a number of dp): it is always a circle.
+      if (type === "avatar" || !present(o, "radius") || isObj(o.radius)) return null;
       if (typeof o.radius === "string" && S.radiusTokens.includes(o.radius)) return o.radius;
       this.log(`screen: ${type} radius ${fmt(o.radius)} is not a radius token, dropped`);
       return null;
     };
     // Task 15: `borderRadius` per corner, `{ topStart, topEnd, bottomStart, bottomEnd }` (an omitted corner is the default).
     const corners = () => {
-      if (!isObj(opt(o, "radius"))) return null;
+      if (type === "avatar" || !isObj(opt(o, "radius"))) return null;
       const m = o.radius;
       const C = S.corners;
       for (const k of Object.keys(m).sort()) if (!C.keys.includes(k)) this.log(`screen: ${type} radius.${k.slice(0, 40)} is not a corner, ignored`);
@@ -1774,7 +2064,80 @@ class Reader {
       this.log(`screen: ${type} minH ${base.minH} is above its maxHeight ${maxH}, maxHeight dropped`);
       maxH = null;
     }
-    return { ...base, span, offset, maxWidthFraction: widthFraction, alignSelf, textAlign, border, elevation, background, minW, maxW, maxH };
+    const positioned = this.positionedOf(o, type);
+    let opacity = null;
+    if (present(o, "opacity")) {
+      const v = o.opacity;
+      if (!(typeof v === "number" && Number.isFinite(v))) this.log(`screen: ${type} opacity ${fmt(v)} is not a number from 0 to 1, dropped`);
+      else {
+        opacity = Math.min(1, Math.max(0, v));
+        if (opacity !== v) this.log(`screen: ${type} opacity ${fmt(v)} is outside 0..1, clamped`);
+      }
+    }
+    const animate = this.animateOf(o, type, boxy || positioned !== null);
+    return { ...base, span, offset, maxWidthFraction: widthFraction, alignSelf, textAlign, border, elevation, background, minW, maxW, maxH, positioned, opacity, animate };
+  }
+
+  /** PluginScreenOutput.animateOf (Task 17): `{ duration?, curve? }` on a box or a positioned child; clamped or defaulted, logged. */
+  animateOf(o, type, takes) {
+    if (!present(o, "animate")) return null;
+    const a = o.animate;
+    const M = S.motion;
+    if (!isObj(a)) { this.log(`screen: ${type} animate is not { duration, curve }, dropped`); return null; }
+    if (!takes) { this.log(`screen: ${type} animate works only on a box or a positioned child, ignored`); return null; }
+    for (const k of Object.keys(a).sort()) if (!M.fields.includes(k)) this.log(`screen: ${type} animate.${k.slice(0, 40)} is not duration or curve, ignored`);
+    let ms = M.defaultMs;
+    if (present(a, "duration")) {
+      const v = a.duration;
+      if (!(typeof v === "number" && Number.isFinite(v))) this.log(`screen: ${type} animate.duration ${fmt(v)} is not a number, the default used`);
+      else {
+        ms = Math.round(Math.min(M.maxMs, Math.max(M.minMs, v)));
+        if (v < M.minMs || v > M.maxMs) this.log(`screen: ${type} animate.duration ${fmt(v)} is outside ${M.minMs}..${M.maxMs}, clamped`);
+      }
+    }
+    let curve = M.curves[0];
+    if (present(a, "curve")) {
+      if (typeof a.curve === "string" && M.curves.includes(a.curve)) curve = a.curve;
+      else this.log(`screen: ${type} animate.curve ${fmt(a.curve)} is not ${M.curves.join(", ")}, the default used`);
+    }
+    return { durationMs: ms, curve };
+  }
+
+  /**
+   * PluginScreenOutput.positionedOf (Task 17, Flutter's Positioned): on a child of a Stack only; each key dp (clamped) or
+   * "<n>%" of the stack (clamped); a value that is neither drops that key, an unknown key is ignored; both sides and a size on
+   * one axis: the size ignored. All logged. A length is { dp, fraction }, the other null.
+   */
+  positionedOf(o, type) {
+    if (!present(o, "positioned")) return null;
+    const p = o.positioned;
+    const P = S.positioned;
+    if (!isObj(p)) { this.log(`screen: ${type} positioned is not { top, left, right, bottom, width, height }, dropped`); return null; }
+    if (this.parentType !== P.parent) { this.log(`screen: ${type} positioned works only on a child of a Stack, ignored`); return null; }
+    for (const k of Object.keys(p).sort()) if (!P.keys.includes(k)) this.log(`screen: ${type} positioned.${k.slice(0, 40)} is not top, left, right, bottom, width or height, ignored`);
+    const percent = new RegExp(P.percentPattern);
+    const length = (k) => {
+      if (!present(p, k)) return null;
+      const v = p[k];
+      const where = `screen: ${type} positioned.${k} ${fmt(v)}`;
+      if (typeof v === "number") {
+        if (!Number.isFinite(v)) { this.log(`${where} is not dp or a percentage, dropped`); return null; }
+        const kept = Math.min(P.maxDp, Math.max(0, v));
+        if (kept !== v) this.log(`${where} is outside 0..${P.maxDp}, clamped`);
+        return { dp: kept, fraction: null };
+      }
+      const m = typeof v === "string" ? percent.exec(v) : null;
+      if (m === null) { this.log(`${where} is not dp or a percentage, dropped`); return null; }
+      const pct = Number(m[1]);
+      const kept = Math.min(100, Math.max(0, pct));
+      if (kept !== pct) this.log(`${where} is outside 0%..100%, clamped`);
+      return { dp: null, fraction: kept / 100 };
+    };
+    const top = length("top"), left = length("left"), right = length("right"), bottom = length("bottom");
+    let width = length("width"), height = length("height");
+    if (left !== null && right !== null && width !== null) { this.log(`screen: ${type} positioned has left, right and width, its width ignored`); width = null; }
+    if (top !== null && bottom !== null && height !== null) { this.log(`screen: ${type} positioned has top, bottom and height, its height ignored`); height = null; }
+    return { top, left, right, bottom, width, height };
   }
 
   /**
@@ -1838,7 +2201,10 @@ class Reader {
       else if (isObj(g)) go = this.goOf(g, where);
       else this.log(`${where} go is not an object, dropped`);
       if (event !== null && go !== null) { this.log(`${where} has both an event and a go, the go dropped`); go = null; }
-      return ui.length === 0 && event === null && go === null ? null : { ui, event, go };
+      // Task 18 (G6): the action's own call budget, on the person's press only (kept only when given).
+      const timeoutMs = this.timeoutOf(raw, where, field, event !== null);
+      if (ui.length === 0 && event === null && go === null) return null;
+      return timeoutMs === null ? { ui, event, go } : { ui, event, go, timeoutMs };
     }
     if (keys.some((k) => GO_KEYS.includes(k))) {
       const go = this.goOf(raw, where);
@@ -1846,6 +2212,21 @@ class Reader {
     }
     this.log(`${where} is not an event, ui operations or a go, dropped`);
     return null;
+  }
+
+  /**
+   * PluginScreenOutput.timeoutOf (Task 18, G6): an action's own timeoutMs: a whole number of ms from minActionTimeoutMs to
+   * maxActionTimeoutMs (clamped, logged), only on a press with an event; else ignored, logged.
+   */
+  timeoutOf(raw, where, field, hasEvent) {
+    const v = opt(raw, "timeoutMs");
+    if (absent(v)) return null;
+    if (!PRESS_FIELDS.includes(field)) { this.log(`${where} timeoutMs works only on the person's press (onPressed, onTap, onLongPress, onSubmitted, onTrailingTap), ignored`); return null; }
+    if (!hasEvent) { this.log(`${where} timeoutMs needs an event, ignored`); return null; }
+    if (typeof v !== "number" || !Number.isFinite(v)) { this.log(`${where} timeoutMs ${fmt(v)} is not a number, ignored`); return null; }
+    const { minActionTimeoutMs: lo, maxActionTimeoutMs: hi } = S.pressBudget;
+    if (v < lo || v > hi) this.log(`${where} timeoutMs ${fmt(v)} is outside ${lo}..${hi}, clamped`);
+    return Math.min(hi, Math.max(lo, Math.floor(v)));
   }
 
   /**
@@ -2118,7 +2499,7 @@ export function checkScreenTree(value, lang = "es", widgets = WIDGETS, { allowSe
     // The root's timers, read after the tree (PluginScreenOutput.frame): their lines come last; then its layout (Task 14).
     if (root !== null) {
       every = timersOf(opt(v, "every"), capped);
-      layout = layoutOf(opt(v, SCREEN_LAYOUT.field), "screen", capped);
+      layout = layoutFor(root, opt(v, SCREEN_LAYOUT.field), "screen", capped);
     }
     return root;
   });
@@ -2132,6 +2513,14 @@ export const SCREEN_LAYOUT = contract.manifest.screen.layout;
  * PluginScreenOutput.layoutOf (Task 14): a screen result's `layout`; absent or null is "scroll", silently; any other value
  * outside the contract's values is logged under [where] and read as "scroll".
  */
+/** PluginScreenOutput.layoutFor (Task 17 item G): a Scaffold root is always "fill" (another layout given: ignored, logged). */
+export function layoutFor(root, v, where, log) {
+  const l = layoutOf(v, where, log);
+  if (root === null || root.type !== "scaffold") return l;
+  if (!absent(v) && l !== "fill") log(`${where}: a Scaffold root is drawn as layout fill, its layout ignored`);
+  return "fill";
+}
+
 export function layoutOf(v, where, log) {
   if (absent(v)) return SCREEN_LAYOUT.values[0];
   if (SCREEN_LAYOUT.values.includes(v)) return v;
@@ -2395,7 +2784,8 @@ export function checkPanelScreen(value, lang = "es", { allowSeries = true, setti
     if (root === null) return null;
     // Task 8j: the result's own player (a refreshMs tick's): honoured only with the playerControl capability.
     const player = panelPlayerOf(opt(v, "player"), capped);
-    const layout = layoutOf(opt(v, SCREEN_LAYOUT.field), "panel", capped);
+    // Task 17 item G: a Scaffold root is always drawn in the fill layout.
+    const layout = layoutFor(root, opt(v, SCREEN_LAYOUT.field), "panel", capped);
     return { root, title, accent, refreshMs, tabs, tab, layout, ...(player ? { player } : {}) };
   });
   return { panel, dropped };
@@ -2476,6 +2866,13 @@ function resolveNode(n, device, widthClass) {
     out.empty = n.empty ? resolveNode(n.empty, device, widthClass) : null;
   }
   if (n.type === "heroCard") out.buttons = kids(n.buttons);
+  // Task 17: a tile's slots and a page view's pages are the node's, read once.
+  if (n.type === "listTile") { out.leading = n.leading ? resolveNode(n.leading, device, widthClass) : null; out.trailing = n.trailing ? resolveNode(n.trailing, device, widthClass) : null; }
+  if (n.type === "scaffold") {
+    for (const k of ["appBar", "body", "fab", "bottomBar"]) out[k] = n[k] ? resolveNode(n[k], device, widthClass) : null;
+  }
+  if (n.type === "appBar") { out.leading = n.leading ? resolveNode(n.leading, device, widthClass) : null; out.actions = kids(n.actions); out.bottom = n.bottom ? resolveNode(n.bottom, device, widthClass) : null; }
+  if (n.type === "pageView") { out.pages = kids(n.pages); out.initialPage = Math.min(n.initialPage, Math.max(0, out.pages.length - 1)); }
   // The fallback is read once, with the base node: each class's copy draws it too.
   if (n.type === "image") out.fallback = n.fallback ? resolveNode(n.fallback, device, widthClass) : null;
   if (n.type === ACCORDION) out.items = n.items.map((it) => ({ ...it, children: kids(it.children) }));
@@ -2502,6 +2899,10 @@ export function childNodes(n) {
   if (Array.isArray(n.children)) return n.children;
   if (n.type === "list") return n.empty ? [...n.items, n.empty] : n.items;
   if (n.type === "heroCard") return n.buttons;
+  if (n.type === "listTile") return [n.leading, n.trailing].filter(Boolean);
+  if (n.type === "pageView") return n.pages;
+  if (n.type === "scaffold") return [n.appBar, n.body, n.fab, n.bottomBar].filter(Boolean);
+  if (n.type === "appBar") return [n.leading, ...n.actions, n.bottom].filter(Boolean);
   if (n.type === "image") return n.fallback ? [n.fallback] : [];
   if (n.type === ACCORDION) return n.items.flatMap((it) => it.children);
   if (n.type === TABLE) return n.rows.flatMap((r) => r.cells.flatMap((c) => c.children));

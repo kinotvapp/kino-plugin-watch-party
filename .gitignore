@@ -7,5 +7,7 @@
 *.pem
 .env
 node_modules/
+# esbuild ^0.21 is the only dependency (npm run build): no lock file is kept.
+package-lock.json
 dist/
 .superpowers/

@@ -5,9 +5,14 @@
   "description": "Kino plugin Party Chat: watch a title together, each on their own device, with a chat and the video in sync, from a tab in Kino's player.",
   "license": "Apache-2.0",
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "check:built": "node scripts/build.mjs --check",
     "test": "node --test test/*.test.mjs",
     "validate": "node sdk/validate.mjs . --repo kinotvapp/kino-plugin-watch-party",
     "sign": "node scripts/sign.mjs",
     "sync": "node scripts/sync-from-example.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0"
   }
 }

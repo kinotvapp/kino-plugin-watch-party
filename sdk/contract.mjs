@@ -417,6 +417,8 @@ function withEnhancements(o, base, opts, exports) {
   numbered.sort((a, b) => a[0] - b[0]);
   let merged = { ...o };
   delete merged.enhancements;
+  // Task 18 (G1): a top-level `jobs` the plugin's own apiVersion ignores never starts to count; jobs come only in a block.
+  if (base.apiVersion < contract.kinoJobs.apiVersion) delete merged.jobs;
   let current = { ...base, enhancementsApplied: [] };
   for (const [key, block] of numbered) {
     // Dropped, never refused: an older Kino installed the plugin, and the app's store re-reads it after a Kino update.
@@ -449,6 +451,7 @@ function enhance(json, key, block, current, opts, exports) {
   if (has(block, "screen")) candidate.screen = block.screen;
   if (has(block, "settings")) candidate.settings = block.settings;
   if (has(block, "panel")) candidate.panel = block.panel;
+  if (has(block, "jobs")) candidate.jobs = block.jobs;
   candidate.apiVersion = key;
   const r = validateManifestObject(candidate, opts);
   if (!r.ok) return `${r.field}: ${r.message}`;
@@ -458,6 +461,11 @@ function enhance(json, key, block, current, opts, exports) {
   if (has(block, "settings")) {
     const retyped = r.manifest.settings.find((s) => current.settings.some((b) => b.key === s.key && b.type !== s.type));
     if (retyped) return E.dropped.settingRetyped.replace("{key}", retyped.key);
+    // Task 18 (G13): nor its sync, as each list's own apiVersion reads it (below the field's apiVersion every value syncs).
+    const syncs = (s, api) => !(api >= contract.settings.sync.apiVersion && s.sync === false);
+    const listApi = current.settingsApiVersion ?? current.apiVersion;
+    const resynced = r.manifest.settings.find((s) => current.settings.some((b) => b.key === s.key && b.type === s.type && syncs(b, listApi) !== syncs(s, key)));
+    if (resynced) return E.dropped.settingResynced.replace("{key}", resynced.key);
   }
   // Categorías for this plugin follow its OWN apiVersion: a screen cannot replace what is never there.
   const categoriesApi = contract.output.categories.apiVersion;
@@ -468,8 +476,13 @@ function enhance(json, key, block, current, opts, exports) {
     ...current, capabilities: r.manifest.capabilities, screen: r.manifest.screen,
     settings: has(block, "settings") ? r.manifest.settings : current.settings,
     panel: has(block, "panel") ? r.manifest.panel : current.panel,
+    // Task 18 (G1): the jobs of a `schedule` an enhancement added (the check at [key] makes each need the other).
+    jobs: r.manifest.jobs || [],
     enhancementsApplied: [...current.enhancementsApplied, key],
   };
+  // Task 18 (G13): the apiVersion the settings list was read at (the block's key when it carried one); kept out of the manifest's
+  // own fields (not enumerable), for the next block's sync check.
+  Object.defineProperty(next, "settingsApiVersion", { value: has(block, "settings") ? key : (current.settingsApiVersion ?? current.apiVersion), enumerable: false });
   // Task 8k: the capability and the contributing panel come together (the check at [key] saw the merged JSON, which may hold a
   // `panel` the plugin's own apiVersion ignores).
   if (next.capabilities.includes(contract.manifest.panel.contributes.capability) !== (next.panel?.contributes === true)) return E.dropped.panelTabNeedsPanel;
@@ -833,7 +846,7 @@ function validateManifestObject(o, { knownPermissions = contract.permissions } =
   // apiVersion 14, `jobs` (Task 8q, PluginJobs.parse): the background jobs of the `schedule` capability; each needs the other.
   let jobs = [];
   if (o.apiVersion >= contract.kinoJobs.apiVersion) {
-    const parsedJobs = parseJobs(o.jobs, caps);
+    const parsedJobs = parseJobs(o.jobs, caps, o.settings || []);
     if (parsedJobs.message) return bad(caps.includes(contract.kinoJobs.capability) && !has(o, "jobs") ? "capabilities" : "jobs", parsedJobs.message);
     jobs = parsedJobs.jobs;
   }
@@ -861,7 +874,7 @@ const JOB_LABEL_SCRUB = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u
  * labels scrubbed, options sorted, runOn "any" or "preferPhone") or `{ message }` (contract.kinoJobs.manifest). Other keys of a job
  * are ignored. Shared cases: test/job-cases.json (run by the app too).
  */
-export function parseJobs(raw, caps) {
+export function parseJobs(raw, caps, settings = []) {
   const J = contract.kinoJobs;
   const M = J.manifest;
   const declared = caps.includes(J.capability);
@@ -897,7 +910,13 @@ export function parseJobs(raw, caps) {
     // Task 8q-2: runOn, the default when absent or null.
     const runOn = j.runOn === undefined || j.runOn === null ? M.runOnDefault : j.runOn;
     if (!M.runOnValues.includes(runOn)) return { message: M.badRunOn };
-    out.push({ id: j.id, label: es, labelEn: en, everyMin: every, everyOptions: options.sort((a, b) => a - b), runOn });
+    // Task 18 (G2): enabledBy, the key of one of the plugin's toggle settings (absent or null: the job's own opt-in switch).
+    let enabledBy = null;
+    if (j.enabledBy !== undefined && j.enabledBy !== null) {
+      if (typeof j.enabledBy !== "string" || !settings.some((s) => s && s.key === j.enabledBy && s.type === "toggle")) return { message: M.badEnabledBy };
+      enabledBy = j.enabledBy;
+    }
+    out.push({ id: j.id, label: es, labelEn: en, everyMin: every, everyOptions: options.sort((a, b) => a - b), runOn, enabledBy });
   }
   return { jobs: out };
 }

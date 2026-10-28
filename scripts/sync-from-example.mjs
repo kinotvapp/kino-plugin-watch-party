@@ -4,7 +4,10 @@
 //   node scripts/sync-from-example.mjs <kino>/docs/plugins/examples/watch-party [--no-kit] [--kit <kino>/plugins/sdk] [--dry-run]
 //
 // What it copies (the example is the source of truth for the code; this repository owns the publishing metadata):
-//   - plugin.js, as it is, except its first comment line, which stops calling it an example;
+//   - src/ (every file, mirrored: a file the example dropped is dropped here too), except the entry's first comment line,
+//     which stops calling it an example; plugin.js, generated from src/ by `npm run build`, as the example built it
+//     (esbuild drops comments, so the bytes are the same: `npm run check:built` proves it here); scripts/build.mjs; and
+//     from the example's package.json, its build scripts (build, check:built) and devDependencies (esbuild);
 //   - test/ (every file, mirrored: a test or fixture the example dropped is dropped here too), with the kit's imports
 //     rewritten from `../../../../../plugins/sdk/` to `../sdk/`;
 //   - from kino-plugin.json, only the fields that make the plugin work (apiVersion, entry, hosts, fetchHosts,
@@ -62,10 +65,35 @@ const walk = (dir) => readdirSync(dir).flatMap((n) => {
   return statSync(p).isDirectory() ? walk(p).map((x) => join(n, x)) : [n];
 });
 
-// 1. plugin.js: the code as it is; only the opening comment stops calling it an example.
-const code = readFileSync(join(EXAMPLE, "plugin.js"), "utf8")
-  .replace(/^\/\/ Watch Party: an example plugin that adds/, "// Party Chat: a Kino plugin that adds");
-const codeChanged = write(join(REPO, "plugin.js"), code);
+// 1. The code: src/ mirrored (only the entry's opening comment stops calling it an example), the generated plugin.js as
+//    the example built it, the build script, and the build part of package.json.
+if (!existsSync(join(EXAMPLE, "src", "plugin.js"))) {
+  console.error(`${join(EXAMPLE, "src", "plugin.js")} is missing: the example's code lives in src/ and is bundled into plugin.js`);
+  process.exit(2);
+}
+const rewriteEntry = (text) => text.replace(/^\/\/ Watch Party: an example plugin that adds/, "// Party Chat: a Kino plugin that adds");
+let srcChanged = false;
+const wantedSrc = new Set();
+for (const rel of walk(join(EXAMPLE, "src"))) {
+  wantedSrc.add(rel);
+  const src = readFileSync(join(EXAMPLE, "src", rel));
+  if (write(join(REPO, "src", rel), rel === "plugin.js" ? rewriteEntry(src.toString("utf8")) : src)) srcChanged = true;
+}
+if (existsSync(join(REPO, "src"))) {
+  for (const rel of walk(join(REPO, "src"))) if (!wantedSrc.has(rel)) { remove(join(REPO, "src", rel)); srcChanged = true; }
+}
+// The signature covers plugin.js only: a change to src/ that builds to the same bytes keeps it.
+const codeChanged = write(join(REPO, "plugin.js"), readFileSync(join(EXAMPLE, "plugin.js")));
+write(join(REPO, "scripts", "build.mjs"), readFileSync(join(EXAMPLE, "scripts", "build.mjs")));
+{
+  const pkgPath = join(REPO, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const theirs = JSON.parse(readFileSync(join(EXAMPLE, "package.json"), "utf8"));
+  const build = Object.fromEntries(["build", "check:built"].filter((k) => theirs.scripts && theirs.scripts[k]).map((k) => [k, theirs.scripts[k]]));
+  const rest = Object.fromEntries(Object.entries(pkg.scripts || {}).filter(([k]) => !(k in build)));
+  const next = { ...pkg, scripts: { ...build, ...rest }, devDependencies: { ...(pkg.devDependencies || {}), ...(theirs.devDependencies || {}) } };
+  write(pkgPath, JSON.stringify(next, null, 2) + "\n");
+}
 
 // 2. test/: mirrored, with the kit's imports pointed at this repository's sdk/.
 const rewriteTest = (text) => text
@@ -160,7 +188,8 @@ if (!flag("--no-kit")) {
 
 console.log(changes.length ? changes.join("\n") : "already in sync: nothing changed");
 if (DRY) console.log("(dry run: nothing written)");
+if (srcChanged && !DRY) console.log("\nsrc/ changed: npm install (once), then npm run check:built proves plugin.js is built from it.");
 if (codeChanged || fieldsChanged) {
   console.log("\nThe plugin changed. Next: raise \"version\" in kino-plugin.json, add it to CHANGELOG.md, then\n" +
-    "  npm test && npm run sign && npm run validate");
+    "  npm run check:built && npm test && npm run sign && npm run validate");
 }
