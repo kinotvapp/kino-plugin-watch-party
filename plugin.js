@@ -1,4 +1,4 @@
-// Fiesta (Watch Party): a Kino plugin that adds a «Fiesta» / «Party» TAB to the player panel of any plugin's title (apiVersion 14).
+// Party Chat: a Kino plugin that adds a «Party Chat» TAB to the player panel of any plugin's title (apiVersion 14).
 //
 // People watch the same title together: a chat (plain text and eight quick reactions, nothing else) and the playback kept
 // in step. Kino only offers generic pieces; the whole Watch Party protocol below is this plugin's:
@@ -698,18 +698,18 @@ export function invitationText({ short = null, words, code, media = null }) {
   // On an En vivo channel the friend opens the panel on any channel: the tab offers the room's.
   const play = media && media.kind === "live" && media.channel ? "pon un canal en vivo" : "reproduce el mismo título";
   const lines = (titleLine) => (short ? [
-    "Únete a mi fiesta en Kino 🎬",
+    "Únete a mi Party Chat en Kino 🎬",
     ...(titleLine ? [titleLine] : []),
     `Código: ${short}`,
-    `En Kino: ${play} ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.`,
-    "(Join my Kino watch party: type the code above in Kino.)",
+    `En Kino: ${play} ▸ panel ▸ Party Chat ▸ escribe el código ▸ Entrar.`,
+    "(Join my Kino Party Chat: type the code above in Kino.)",
   ] : [
-    "Únete a mi fiesta en Kino 🎬",
+    "Únete a mi Party Chat en Kino 🎬",
     ...(titleLine ? [titleLine] : []),
     `Palabras: ${words}`,
     `Código: ${code}`,
-    `En Kino: ${play} ▸ panel ▸ Fiesta ▸ Entrar con palabras y código.`,
-    "(Join my Kino watch party: words + code above.)",
+    `En Kino: ${play} ▸ panel ▸ Party Chat ▸ Entrar con palabras y código.`,
+    "(Join my Kino Party Chat: words + code above.)",
   ]).join("\n");
   const titleOf = (title) => {
     if (!media || !title) return null;
@@ -1627,7 +1627,7 @@ function stepDown(p, now) {
 // ---------- texts (Kino-first: every text has its Spanish base and English twin) ----------
 
 const T = {
-  title: ["Fiesta", "Watch party"],
+  title: ["Party Chat", "Party Chat"],
   yourName: ["Tu nombre", "Your name"],
   create: ["Crear sala", "Create room"],
   words: ["Palabras de la sala", "Room words"],
@@ -1649,7 +1649,7 @@ const T = {
   backupInfo: ["Si el anfitrión se va, la sala sigue en una puerta de respaldo.", "If the host leaves, the room goes on through a backup door."],
   empty: ["Todavía no hay mensajes.", "No messages yet."],
   members: ["Personas", "People"],
-  noScreens: ["La Fiesta necesita las pantallas de plugins activas en Ajustes.", "Watch party needs plugin screens switched on in Settings."],
+  noScreens: ["Party Chat necesita las pantallas de plugins activas en Ajustes.", "Party Chat needs plugin screens switched on in Settings."],
   openTitle: ["Abrir este título", "Open this title"],
   resync: ["Volver a sincronizar", "Sync again"],
   retry: ["Reintentar", "Try again"],
@@ -1669,7 +1669,7 @@ function errorText(e) {
     case "room_unreachable": return both("No se pudo llegar a la sala. Revisa la conexión.", "The room could not be reached. Check the connection.");
     case "room_busy": return both("Este aparato ya está en otras salas", "This device is already in other rooms");
     case "rate_limited": return both("Demasiados intentos: espera un momento", "Too many tries: wait a moment");
-    case "permission_denied": return both("La Fiesta no tiene permiso para salas: revísalo en Ajustes", "Watch party may not use rooms: check it in Settings");
+    case "permission_denied": return both("Party Chat no tiene permiso para salas: revísalo en Ajustes", "Party Chat may not use rooms: check it in Settings");
     default: return both("Algo salió mal con la sala", "Something went wrong with the room");
   }
 }
@@ -1686,7 +1686,7 @@ function roomLine(p, ctx) {
   const copy = p.role === "host" && p.code && p.hostWords && !isTv(ctx)
     ? [{
       type: "IconButton", key: "btnCopyInvite", icon: "copy", labelText: "Copiar invitación", labelTextEn: "Copy invitation", devices: ["phone", "desktop"],
-      onPressed: { go: { copy: { text: invitationText({ short: p.short, words: p.hostWords, code: p.code, media: p.media }), label: "Invitación a la Fiesta", sensitive: true } } },
+      onPressed: { go: { copy: { text: invitationText({ short: p.short, words: p.hostWords, code: p.code, media: p.media }), label: "Invitación a Party Chat", sensitive: true } } },
     }]
     : [];
   return [{
@@ -2611,7 +2611,7 @@ async function act(k, p, event, ctx, values, name, now) {
       if (isObj(text)) return text;
       // The room's own address (no service needed), or an older room's words+code QR.
       const q = parseRoomUrl(text.trim()) || parsePartyQr(text);
-      if (!q) return toast(both("Ese código QR no es de una Fiesta", "That QR code is not a watch party's"), "error");
+      if (!q) return toast(both("Ese código QR no es de Party Chat", "That QR code is not a Party Chat code"), "error");
       // As for a typed code: joined at once with a saved name, else the name step (j2).
       return toNameOrJoin(k, p, { words: q.words, code: q.code, short: null }, ctx, now);
     }
@@ -2914,7 +2914,7 @@ async function addDevice(k, p, ctx, now) {
   const text = await scanOrExplain(k, tx("addDeviceTitle"));
   if (isObj(text)) return text;
   const q = parseLinkQr(text, now);
-  if (!q) return toast(both("Ese código QR no es el de un televisor con la Fiesta", "That QR code is not a TV's watch party code"), "error");
+  if (!q) return toast(both("Ese código QR no es el de un televisor con Party Chat", "That QR code is not a TV's Party Chat code"), "error");
   if (q.error === "expired") return toast(both("El código del televisor venció: pide uno nuevo", "The TV's code expired: show a new one"), "warning");
   if (q.code === p.code) return toast(both("Ese código no es el de un televisor", "That is not a TV's code"), "error");
   let linked;

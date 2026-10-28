@@ -2,7 +2,7 @@
   "name": "kino-plugin-watch-party",
   "private": true,
   "type": "module",
-  "description": "Kino plugin Fiesta (Watch Party): watch a title together, each on their own device, with a chat and the video in sync, from a tab in Kino's player.",
+  "description": "Kino plugin Party Chat: watch a title together, each on their own device, with a chat and the video in sync, from a tab in Kino's player.",
   "license": "Apache-2.0",
   "scripts": {
     "test": "node --test test/*.test.mjs",

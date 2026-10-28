@@ -64,14 +64,14 @@ const walk = (dir) => readdirSync(dir).flatMap((n) => {
 
 // 1. plugin.js: the code as it is; only the opening comment stops calling it an example.
 const code = readFileSync(join(EXAMPLE, "plugin.js"), "utf8")
-  .replace(/^\/\/ Watch Party: an example plugin that adds/, "// Fiesta (Watch Party): a Kino plugin that adds");
+  .replace(/^\/\/ Watch Party: an example plugin that adds/, "// Party Chat: a Kino plugin that adds");
 const codeChanged = write(join(REPO, "plugin.js"), code);
 
 // 2. test/: mirrored, with the kit's imports pointed at this repository's sdk/.
 const rewriteTest = (text) => text
   .replace(/(["'])(?:\.\.\/)+plugins\/sdk\//g, "$1../sdk/")
   .replace(/join\(HERE,(?: "\.\.",)+ "plugins", "sdk"/g, 'join(HERE, "..", "sdk"')
-  .replace(/^\/\/ The Watch Party example run with Kino's Node kit \(plugins\/sdk\)/, "// Fiesta (Watch Party) run with Kino's Node kit (sdk/)");
+  .replace(/^\/\/ The Watch Party example run with Kino's Node kit \(plugins\/sdk\)/, "// Party Chat run with Kino's Node kit (sdk/)");
 const exampleTests = join(EXAMPLE, "test");
 const wanted = new Set();
 if (existsSync(exampleTests)) {

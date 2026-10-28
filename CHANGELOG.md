@@ -2,6 +2,8 @@
 
 ## 1.1.0
 
+- **New name: Party Chat** (it was Fiesta / Party). The id `watch-party` and this repository stay the same, so an
+  installed copy updates in place and keeps its settings.
 - **A 5-digit code to join:** the host's device asks Kino's short-code service (`url-code.kinotv.workers.dev`, the plugin's
   only host) for a code. Guests type those 5 digits, or scan the QR. The room's words and its 12-digit code stay under
   **Advanced options** for when the service does not answer. A code is revoked when its room closes.

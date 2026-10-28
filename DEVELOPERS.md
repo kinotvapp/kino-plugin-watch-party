@@ -1,4 +1,4 @@
-# Fiesta (Watch Party): for developers
+# Party Chat: for developers
 
 How the plugin works inside, how to test it and how a new version is made. The person-facing documentation is
 [README.md](README.md) ([español](README.es.md)).
@@ -44,7 +44,7 @@ always with the same key: Kino refuses an update signed by another one.
 ## How it works
 
 <!-- sync:begin example-readme -->
-_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `4f1586cb2`. Do not edit by hand: change the example and sync again._
+_Synced by `scripts/sync-from-example.mjs` from `docs/plugins/examples/watch-party` in Kino's repository at `a97783476`. Do not edit by hand: change the example and sync again._
 
 ### What Kino asks the person (the red lines are Kino's)
 
@@ -52,7 +52,7 @@ At install Kino shows its own consent lines, in red, and the person can switch e
 Ajustes. The plugin cannot word or hide them:
 
 - `playerPanelTab`: the tab SEES what the person watches (title, year, ids, position) while it is open.
-- `playerControl`: it may pause, resume and move the video by itself. Kino announces every such action ("Fiesta: pausado")
+- `playerControl`: it may pause, resume and move the video by itself. Kino announces every such action ("Party Chat: pausado")
   and drops it under Kino's dialogs, while the person seeks, and beyond 30 a minute.
 - `room`: it opens a room that people reach over the Internet through this device, through Kino's own tunnel. The plugin
   never sees a URL, only the words and the code.

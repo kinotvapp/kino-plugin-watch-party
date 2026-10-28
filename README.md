@@ -1,11 +1,11 @@
-# Fiesta (Watch Party)
+# Party Chat
 
 [Español](README.es.md) · [For developers](DEVELOPERS.md)
 
-<img src="icon.png" width="96" alt="Watch Party icon" align="right">
+<img src="icon.png" width="96" alt="Party Chat icon" align="right">
 
 A [Kino](https://github.com/kinotvapp/kino-light) plugin for **watching together**, each person on their own device: a
-**Party** tab in the player with a chat, eight quick reactions and the video kept in step with the host's. The room lives
+**Party Chat** tab in the player with a chat, eight quick reactions and the video kept in step with the host's. The room lives
 on the device of whoever creates it and is reached through Kino's own tunnel. There is no account and no sign-up. The only
 outside service is a small short-code service run by the plugin's author (see [Privacy and security](#privacy-and-security)).
 
@@ -23,7 +23,7 @@ outside service is a small short-code service run by the plugin's author (see [P
 ## Screenshots
 
 <!-- To capture before publishing, in screenshots/:
-  1-home-phone.jpg       the Party tab before a room exists (Create room, Join a room)
+  1-home-phone.jpg       the Party Chat tab before a room exists (Create room, Join a room)
   2-join-code-phone.jpg  the join step: Room code (5 digits) and Next
   3-room-phone.jpg       the Room tab of the host: «Room: 41 408» with the copy icon, members, QR
   4-chat-phone.jpg       the chat with bubbles, a reaction and the input with its send icon
@@ -39,8 +39,8 @@ a newer version of Kino".
 1. On the phone, open **Menu ▸ Plugins** and tap **+** (Add plugin). On the TV, open **Plugins** and choose **Add
    plugin**.
 2. Leave the type on **Kino**. In **Plugin address**, type `kinotvapp/kino-plugin-watch-party` and tap **Add**.
-3. Kino shows **Install Fiesta**. Tap **See details**, read the lines (they are explained below), then **Install**.
-4. Play any title of any plugin and open the player's panel: the **Party** tab is there.
+3. Kino shows **Install Party Chat**. Tap **See details**, read the lines (they are explained below), then **Install**.
+4. Play any title of any plugin and open the player's panel: the **Party Chat** tab is there.
 
 Everyone in the party needs the plugin installed. It is **signed by its author** ("Signed by its author" on the install
 sheet): Kino checks that every update is signed with the same key.
@@ -59,7 +59,7 @@ plugin means the same cut and the same file, so positions match. When they do no
 
 ## Host a party
 
-1. Play the title, open the panel and the **Party** tab, and tap **Create room**. The first time, it asks **What's your
+1. Play the title, open the panel and the **Party Chat** tab, and tap **Create room**. The first time, it asks **What's your
    name?** (what the others see) and remembers it.
 2. Opening a room takes a few seconds. The room opens on the chat, and the **Room** tab starts with one line:
    **Room: 41 408**.
@@ -70,11 +70,11 @@ plugin means the same cut and the same file, so positions match. When they do no
 The invitation is plain text, without any link, for example:
 
 ```
-Únete a mi fiesta en Kino 🎬
+Únete a mi Party Chat en Kino 🎬
 Película: Dune (2021), con «My plugin»
 Código: 41408
-En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Unirme.
-(Join my Kino watch party: code above.)
+En Kino: reproduce el mismo título ▸ panel ▸ Party Chat ▸ escribe el código ▸ Entrar.
+(Join my Kino Party Chat: type the code above in Kino.)
 ```
 
 It carries the title with its year (and the season and episode), the plugin's name and the code. Nothing else: no address
@@ -87,7 +87,7 @@ code for **Join with words and code**.
 
 ## Join a party
 
-1. Play **the same title with the same plugin**, open the panel and the **Party** tab, and tap **Join a room**.
+1. Play **the same title with the same plugin**, open the panel and the **Party Chat** tab, and tap **Join a room**.
 2. Type the **Room code** (5 digits; spaces and hyphens are fine) and tap **Next**. The code is checked first; then, the
    first time, it asks your name.
 3. Other ways in, from the same step: **Paste invitation** and **Scan QR** on a phone, **Link with my phone** on a TV,
@@ -121,7 +121,7 @@ the chat app did to it: bold, emoji, line breaks or full-width digits.
 
 ## Phone + TV
 
-On the TV, open the **Party** tab, tap **Join a room** and choose **Link with my phone**. The TV shows a QR code that
+On the TV, open the **Party Chat** tab, tap **Join a room** and choose **Link with my phone**. The TV shows a QR code that
 works once and for 5 minutes. On the phone, inside the room, tap **Add device** and scan **your own** TV's code. The TV
 then joins with one press: it plays the video, follows the host, shows the chat and can send the eight reactions (typing
 stays on the phone). The member list shows one person with 📱 📺. If the phone leaves, the TV stays (reactions only) and
@@ -145,7 +145,7 @@ What Kino shows when you install, and what each line means here:
 | Kino says | What it means for this plugin |
 | --- | --- |
 | **Its tab in the player will see what you are watching (title, year, ids and position) while you have it open, and can send it to its services** (in red) | The tab reads the title you play, its year, its TMDB/IMDb ids and your position, only while the tab is open. It sends them to the **people in your room** (the room's title and the host's position), so everyone watches the same thing in step. Switch: **Show in the player**. |
-| **Can pause, resume and move your video by itself** (in red) | A guest's tab follows the host: it pauses, resumes, jumps and sets the speed. Kino announces every such action ("Fiesta: paused"), ignores it while you seek or a Kino dialog is open, and allows at most 30 a minute. Only the host's messages move anyone's video. Switch: **Let it pause and move my video** (without it you can still chat). |
+| **Can pause, resume and move your video by itself** (in red) | A guest's tab follows the host: it pauses, resumes, jumps and sets the speed. Kino announces every such action ("Party Chat: paused"), ignores it while you seek or a Kino dialog is open, and allows at most 30 a minute. Only the host's messages move anyone's video. Switch: **Let it pause and move my video** (without it you can still chat). |
 | **Can open a room that people reach over the Internet through this device, and send the room's messages to whoever joins** (in red) | **Create room** opens a room on your device, reached through Kino's tunnel, and the chat, the title and the playback go to the people who join. Joining someone else's room goes through theirs. A room opens or joins only when you press a button. Switch: **Let it open rooms over the Internet**. |
 | (no line) camera scan | **Scan QR** and **Add device** open **Kino's own scanner**, only when you press them; the plugin gets only the text in the code. |
 | The host `url-code.kinotv.workers.dev` | The short-code service, the only address the plugin reaches (see below). |
@@ -193,7 +193,7 @@ Each red permission can be switched off later in the plugin's tab in Kino's Sett
 - **"The host is not answering"**: it may be your connection or theirs. **Try again** first tries the host again, and only
   then the backup doors.
 - **The party stopped when I closed the panel**: pin the panel (see above).
-- **"Watch party needs plugin screens switched on in Settings"**: turn plugin screens on in Kino's Settings.
+- **"Party Chat needs plugin screens switched on in Settings"**: turn plugin screens on in Kino's Settings.
 
 ## License
 

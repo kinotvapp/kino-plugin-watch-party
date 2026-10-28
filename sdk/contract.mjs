@@ -1158,6 +1158,12 @@ function validateSettings(list, apiVersion = contract.maxApiVersion) {
       if (!s.sync.types.includes(o.type)) return s.sync.onlyPasswordOrTextMessage.replace("{key}", key);
       if (typeof o.sync !== "boolean") return s.sync.notBooleanMessage.replace("{key}", key);
     }
+    // apiVersion 14 `unlockWith` (PluginSettings): a toggle or a select may ask Kino's 18+ code before it moves away from its
+    // default; only one of the known values; ignored below it.
+    if (apiVersion >= s.unlockWith.apiVersion && o.unlockWith !== undefined && o.unlockWith !== null) {
+      if (!s.unlockWith.types.includes(o.type)) return s.unlockWith.onlyToggleOrSelectMessage.replace("{key}", key);
+      if (!s.unlockWith.values.includes(o.unlockWith)) return s.unlockWith.badValueMessage.replace("{key}", key).replace("{values}", s.unlockWith.values.join(", "));
+    }
   }
   if (list.filter((o) => o.type === "link").length > s.configAids.maxLinks) return `The plugin has more than ${s.configAids.maxLinks} settings of type link`;
   if (list.filter((o) => o.type === "help").length > s.configAids.maxHelps) return `The plugin has more than ${s.configAids.maxHelps} settings of type help`;
@@ -2736,6 +2742,17 @@ export function settableTypes(apiVersion) {
 }
 
 /**
+ * SettingLocks.refusesPluginWrite: whether a plugin's own write of [wanted] to setting [s] (its manifest entry) is refused by its
+ * `unlockWith`: anything but its default (a toggle without one starts off, a select at its first option).
+ */
+export function lockRefuses(s, wanted) {
+  if (!s || s.unlockWith === undefined || s.unlockWith === null) return false;
+  const def = s.default !== undefined && s.default !== null ? s.default
+    : s.type === "toggle" ? false : s.type === "select" && Array.isArray(s.options) && s.options[0] ? s.options[0].value : null;
+  return wanted !== def;
+}
+
+/**
  * An action answer's `setSettings` (additive action.setSettings), as PluginSettingsUi.setValues: the kept values, or null when
  * Kino refuses the whole field (one drop line). Only the plugin's own text/select settings and, from apiVersion 13, its
  * passwords (never a url); a value the scrub would change holds a secret and is refused.
@@ -2753,7 +2770,8 @@ function setSettingsOf(raw, settings, cleared, scrub, drop, apiVersion) {
     const s = settings.find((x) => x.key === k && types.includes(x.type));
     const v = typeof raw[k] === "string" ? raw[k].trim() : null;
     const type = s && contract.settings.types[s.type];
-    const fits = s && v !== null && !cleared.includes(k) && !(s.required === true && !v) &&
+    // A locked select (unlockWith) moves away from its default only by the person, after the code (SettingLocks).
+    const fits = s && v !== null && !cleared.includes(k) && !(s.required === true && !v) && !lockRefuses(s, v) &&
       (s.type === "select" ? (s.options || []).some((o) => o.value === v)
         : v.length <= type.maxChars && (s.type !== "url" || !v || isUserServer(v))) &&
       scrub(v) === v;

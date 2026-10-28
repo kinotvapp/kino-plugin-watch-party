@@ -1,4 +1,4 @@
-// Fiesta (Watch Party) run with Kino's Node kit (sdk/): the same sandbox as the app, its panel results and answers
+// Party Chat run with Kino's Node kit (sdk/): the same sandbox as the app, its panel results and answers
 // read by the kit's screen-format panel validator (the app's PanelScreenOutput rules), its context the app's foreign one (a tab
 // contributed to another plugin's title). Two layers:
 //
@@ -1288,11 +1288,11 @@ test("invitationText: the short code only (<= 6 lines, < 500), or words + code w
   const media = { source: LATINO, tmdb: 438631, imdb: "tt1160419", kind: "movie", season: null, episode: null, title: "Dune", year: 2021 };
   const text = p.invitationText({ short: "41408", words: W, code: "123456789012", media });
   assert.equal(text, [
-    "Únete a mi fiesta en Kino 🎬",
+    "Únete a mi Party Chat en Kino 🎬",
     "Película: Dune (2021), con «Latino»",
     "Código: 41408",
-    "En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ escribe el código ▸ Entrar.",
-    "(Join my Kino watch party: type the code above in Kino.)",
+    "En Kino: reproduce el mismo título ▸ panel ▸ Party Chat ▸ escribe el código ▸ Entrar.",
+    "(Join my Kino Party Chat: type the code above in Kino.)",
   ].join("\n"));
   assert.ok(!text.includes(W) && !text.includes("123456789012"), "the words and the room code stay out of it");
   const series = p.invitationText({ short: "41408", words: W, code: "1234", media: { ...media, kind: "series", title: "Breaking Bad", year: 2008, season: 2, episode: 3 } });
@@ -1842,7 +1842,7 @@ test("text sizes: no style above h4 but the short code; every text and banner li
 
 // ---------- owner feedback from the real TV on the room view (2026-10-27) ----------
 
-test("room view: no «Fiesta» or room-name heading; a header row (status left, sync icon right for guests); messages above the input", async () => {
+test("room view: no «Party Chat» or room-name heading; a header row (status left, sync icon right for guests); messages above the input", async () => {
   let { host, guests: [bea], t } = await room(["Bea"]);
   await say(bea, "hola", t);
   t = await rounds([host, bea], t + 10, 2);
@@ -1852,7 +1852,7 @@ test("room view: no «Fiesta» or room-name heading; a header row (status left, 
       d.tab = undefined;
       const { raw } = await panel(d, t);
       const json = JSON.stringify(raw.root);
-      assert.ok(!/"text":"(Fiesta|Sala de [^"]*)"/.test(json), "no redundant heading");
+      assert.ok(!/"text":"(Party Chat|Fiesta|Sala de [^"]*)"/.test(json), "no redundant heading");
       const kids = raw.root.children;
       const header = kids.find((n) => n.key === "headerRow");
       assert.ok(header, "a header row");
@@ -2158,7 +2158,7 @@ test("live: the invitation names the channel and asks for a live channel, still 
   const text = p.invitationText({ short: "41408", words: "a-b-c-d", code: "1234", media });
   assert.equal(text.split("\n").length, 5);
   assert.ok(text.includes("En vivo: La 1, con «TDT»"), text);
-  assert.ok(text.includes("En Kino: pon un canal en vivo ▸ panel ▸ Fiesta"), text);
+  assert.ok(text.includes("En Kino: pon un canal en vivo ▸ panel ▸ Party Chat"), text);
   assert.ok(Array.from(text).length < 500);
 });
 

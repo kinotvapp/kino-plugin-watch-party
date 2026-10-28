@@ -1,10 +1,10 @@
 {
   "id": "watch-party",
-  "name": "Fiesta",
+  "name": "Party Chat",
   "version": "1.1.0",
   "apiVersion": 14,
   "entry": "plugin.js",
-  "description": "Mira un título con tus amigos, cada quien en su aparato: una pestaña en el reproductor con chat, reacciones y el video sincronizado. Entra con un código de 5 números o con su QR. (Watch Party: watch a title together, with a chat and the video in sync.)",
+  "description": "Mira un título con tus amigos, cada quien en su aparato: una pestaña en el reproductor con chat, reacciones y el video sincronizado. Entra con un código de 5 números o con su QR. (Party Chat: watch a title together, with a chat and the video in sync.)",
   "author": "kinotvapp",
   "homepage": "https://github.com/kinotvapp/kino-plugin-watch-party",
   "icon": "icon.png",
@@ -27,12 +27,12 @@
       "title",
       "live"
     ],
-    "label": "Fiesta",
-    "labelEn": "Party",
+    "label": "Party Chat",
+    "labelEn": "Party Chat",
     "icon": "heart"
   },
   "signature": {
     "authorKey": "82b87b938e0a95b142467c815a8823cb54310a13a828c3c4c77b1eda43294ae6",
-    "value": "6206ae4480c2f859ddd362f528b961f7356e4e95284af512ee1cf657c27e9494a6a00cbd7ae4bbe63b3b96849c6b1dd80aae2180697fef8bc28f514486f25204"
+    "value": "93ef1266d5c936eeed4f3b8d3e28f3a8aa2591e8ba7e463f3734372438e44eb4f7346187d8526be19f4d5dae3266a32c594a26bde9b560846b1ddc50a454e20a"
   }
 }

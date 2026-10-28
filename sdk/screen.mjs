@@ -236,8 +236,16 @@ function settingsModel(raw) {
     options: Array.isArray(s.options) ? s.options.filter(isObj).map((o) => o.value) : [],
     fields: Array.isArray(s.fields) ? s.fields.filter(isObj).map((f) => ({ key: f.key, type: f.type, required: f.required === true })) : [],
     max: Number.isInteger(s.max) ? s.max : contract.settings.list.defaultMaxEntries,
+    // apiVersion 14 `unlockWith` (SettingLocks): the lock and the value it starts at (a toggle without a default is off, a
+    // select at its first option).
+    unlockWith: typeof s.unlockWith === "string" ? s.unlockWith : null,
+    start: s.default !== undefined && s.default !== null ? s.default
+      : s.type === "toggle" ? false : s.type === "select" && Array.isArray(s.options) && isObj(s.options[0]) ? s.options[0].value : null,
   }));
 }
+
+/** ScreenConfig.lockedWhy: why a `config` write moving a locked setting away from its default is refused. */
+const lockedWhy = (s) => contract.settings.unlockWith.lockedWhy.replace("{value}", s.unlockWith);
 
 const maxChars = (type) => contract.settings.types[type]?.maxChars ?? 0;
 
@@ -245,6 +253,8 @@ const maxChars = (type) => contract.settings.types[type]?.maxChars ?? 0;
 function configValue(s, raw, note) {
   const emptied = () => (s.required ? { why: "is required, it cannot be emptied" } : { value: null });
   if (absent(raw)) return emptied();
+  // A locked setting moves away from its default only through Kino's form, after the code (SettingLocks.refusesPluginWrite).
+  if (s.unlockWith && raw !== s.start) return { why: lockedWhy(s) };
   switch (s.type) {
     case "toggle": return typeof raw === "boolean" ? { value: raw } : { why: "is not true or false" };
     case "select": return typeof raw === "string" && s.options.includes(raw) ? { value: raw } : { why: "is not one of its options" };
@@ -308,6 +318,8 @@ function bindProblem(type, multiple, key, s) {
   const k = key.slice(0, 40);
   if (!s) return `bind "${k}" is not one of this plugin's settings`;
   if (!S.configTypes.includes(s.type)) return `bind "${k}" is of type ${s.type}, never written from a screen`;
+  // A locked setting is changed only in Kino's own form (a settings node), which asks the code.
+  if (s.unlockWith) return contract.settings.unlockWith.lockedBind.replace("{key}", k).replace("{value}", s.unlockWith);
   const holds = type === "chips" && multiple ? [] : S.bindHolds[type] || [];
   return holds.includes(s.type) ? null : `bind "${k}" is of type ${s.type}, which this field cannot hold`;
 }
@@ -474,7 +486,24 @@ class Reader {
 
   text(o, name) { return localized(o, name, this.lang).slice(0, LIMITS.maxTextChars); }
 
+  /**
+   * PluginScreenOutput.node (Task 17): `childOf` is the type of the node whose `children` (or a list's `items`) are being read,
+   * else null; `parentType` the one of the node whose own fields are being read (a child's alignSelf and positioned read it).
+   */
   node(written, depth) {
+    const parent = this.childOf ?? null;
+    this.childOf = null;
+    const outerParent = this.parentType ?? null;
+    try {
+      this.parentType = parent;
+      return this.nodeIn(written, depth);
+    } finally {
+      this.childOf = parent;
+      this.parentType = outerParent;
+    }
+  }
+
+  nodeIn(written, depth) {
     if (depth > this.maxDepth) {
       if (!this.depthLogged) { this.depthLogged = true; this.log(`screen: deeper than ${this.maxDepth} levels, dropped`); }
       return null;
@@ -604,7 +633,7 @@ class Reader {
 
   /** What one pass over a node's own fields read: the style, the actions and the widget's builder. */
   own(o, type, depth, drop) {
-    let style = this.style(o, type);
+    let style = this.style(o, type, depth);
     // A text is drawn on Kino's surfaces: `onPrimary` (the text on a red fill) does not read there, the default is used.
     if (type === "text" && style.color === "onPrimary") {
       this.log('screen: text color "onPrimary" does not read on a surface, the default used');
@@ -691,10 +720,17 @@ class Reader {
     let n = raw.length;
     if (n > cap) { n = cap; this.log(`screen: a list keeps ${cap} items, the rest dropped`); }
     const out = [];
-    for (let i = 0; i < n; i++) {
-      if (!isObj(raw[i])) { this.log("screen: a child is not an object, dropped"); continue; }
-      const c = this.node(raw[i], depth + 1);
-      if (c !== null) out.push(c);
+    const outer = this.childOf ?? null;
+    // A node's own children (an accordion item's or a cell's are not a Row's or a Column's).
+    this.childOf = who === null && typeof opt(o, "type") === "string" ? o.type : null;
+    try {
+      for (let i = 0; i < n; i++) {
+        if (!isObj(raw[i])) { this.log("screen: a child is not an object, dropped"); continue; }
+        const c = this.node(raw[i], depth + 1);
+        if (c !== null) out.push(c);
+      }
+    } finally {
+      this.childOf = outer;
     }
     return out;
   }
@@ -1693,7 +1729,78 @@ class Reader {
       this.log(`screen: ${type} offset ${offset} and span ${span} pass ${cols} columns, the offset lowered to ${cols - span}`);
       offset = cols - span;
     }
-    return { ...base, span, offset, maxWidthFraction: fraction() };
+    const widthFraction = fraction();
+    // Task 17: the box and text properties, read last and in this order (the app's lines come in the same one).
+    const B = S.boxProps;
+    const boxy = B.boxWidgets.includes(type);
+    let alignSelf = null;
+    if (present(o, "alignSelf")) {
+      if (!(typeof o.alignSelf === "string" && ALIGNS.includes(o.alignSelf))) this.log(`screen: ${type} alignSelf ${fmt(o.alignSelf)} is not start, center, end or stretch, dropped`);
+      else if (!B.alignSelfParents.includes(this.parentType) || depth === this.wrapChildDepth) this.log(`screen: ${type} alignSelf works only in a Row or a Column, ignored`);
+      else alignSelf = o.alignSelf;
+    }
+    let textAlign = null;
+    if (present(o, "textAlign")) {
+      if (!(typeof o.textAlign === "string" && B.textAligns.includes(o.textAlign))) this.log(`screen: ${type} textAlign ${fmt(o.textAlign)} is not ${B.textAligns.join(", ")}, dropped`);
+      else if (!B.textAlignWidgets.includes(type)) this.log(`screen: ${type} textAlign works only on a node that draws text, ignored`);
+      else textAlign = o.textAlign;
+    }
+    const border = this.borderOf(o, type, boxy);
+    let elevation = null;
+    if (present(o, "elevation")) {
+      const v = o.elevation;
+      const max = B.maxElevation;
+      if (!(typeof v === "number" && Number.isFinite(v))) this.log(`screen: ${type} elevation ${fmt(v)} is not a number from 0 to ${max}, dropped`);
+      else if (!B.elevationWidgets.includes(type)) this.log(`screen: ${type} elevation works only on a Card or a Stack, ignored`);
+      else {
+        elevation = Math.round(Math.min(max, Math.max(0, v)));
+        if (v < 0 || v > max) this.log(`screen: ${type} elevation ${fmt(v)} is outside 0..${max}, clamped`);
+      }
+    }
+    let background = null;
+    if (present(o, "background")) {
+      if (!(typeof o.background === "string" && S.colorRoles.includes(o.background))) this.log(`screen: ${type} background ${fmt(o.background)} is not a color role, dropped`);
+      else if (!boxy) this.log(`screen: ${type} background works only on a node that draws a box, ignored`);
+      else background = o.background;
+    }
+    const minW = size("minWidth");
+    let maxW = size("maxWidth");
+    if (minW !== null && maxW !== null && minW > maxW) {
+      this.log(`screen: ${type} minWidth ${minW} is above its maxWidth ${maxW}, maxWidth dropped`);
+      maxW = null;
+    }
+    let maxH = size("maxHeight");
+    if (base.minH !== null && maxH !== null && base.minH > maxH) {
+      this.log(`screen: ${type} minH ${base.minH} is above its maxHeight ${maxH}, maxHeight dropped`);
+      maxH = null;
+    }
+    return { ...base, span, offset, maxWidthFraction: widthFraction, alignSelf, textAlign, border, elevation, background, minW, maxW, maxH };
+  }
+
+  /**
+   * PluginScreenOutput.borderOf (Task 17): a box's `border`, `{ width?, color? }`; off a box ignored; a width that is no number
+   * drops it; a width outside the range is clamped and a colour that is no role takes the default; all logged.
+   */
+  borderOf(o, type, boxy) {
+    if (!present(o, "border")) return null;
+    const b = o.border;
+    if (!isObj(b)) { this.log(`screen: ${type} border is not { width, color }, dropped`); return null; }
+    if (!boxy) { this.log(`screen: ${type} border works only on a node that draws a box, ignored`); return null; }
+    const B = S.boxProps.border;
+    for (const k of Object.keys(b).sort()) if (!B.fields.includes(k)) this.log(`screen: ${type} border.${k.slice(0, 40)} is not width or color, ignored`);
+    let width = B.defaultWidth;
+    if (present(b, "width")) {
+      const v = b.width;
+      if (!(typeof v === "number" && Number.isFinite(v))) { this.log(`screen: ${type} border.width ${fmt(v)} is not a number, dropped`); return null; }
+      width = Math.min(B.maxWidth, Math.max(0, v));
+      if (width !== v) this.log(`screen: ${type} border.width ${fmt(v)} is outside 0..${B.maxWidth}, clamped`);
+    }
+    let color = null;
+    if (present(b, "color")) {
+      if (typeof b.color === "string" && S.colorRoles.includes(b.color)) color = b.color;
+      else this.log(`screen: ${type} border.color ${fmt(b.color)} is not a color role, the default used`);
+    }
+    return { width, color };
   }
 
   // ---- actions ----

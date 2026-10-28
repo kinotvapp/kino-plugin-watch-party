@@ -697,7 +697,7 @@ interface KinoPanelEvent {
  * only `seekToMs`, after a press in it. With the `playerControl` capability (approved by the person on a red line, revocable in
  * Ajustes: never assume it) every origin counts, and a contributed tab may also `pause` and set the `speed` (never stored: it
  * ends with the title, and the person's own speed wins). Such an action is announced to the person with a short notice naming
- * your plugin ("Fiesta: pausado"), which you cannot word or hide; it is dropped while Kino is not in front (the app in the
+ * your plugin ("Party Chat: pausado"), which you cannot word or hide; it is dropped while Kino is not in front (the app in the
  * background, a Kino page over the player), one of Kino's dialogs is up or the person is seeking, on live only `pause` counts,
  * at most 30 a minute and one a second. One seek or pause a second, always. A `pause` is dropped while the video is cast
  * (Chromecast or DLNA) and when the video is already in that state (check `context.paused`). A `panel` inside an answer carries
@@ -1683,6 +1683,15 @@ type KinoManifestSetting =
        * A text one is still drawn as a plain text field (nothing masked). Default `true`.
        */
       sync?: boolean;
+      /**
+       * apiVersion 14, on a `toggle` or a `select` only: `"adultCode"` makes Kino ask the device's 18+ code (its own prompt, phone
+       * and TV) before the person moves this setting AWAY from its `default` in Kino's settings form (Ajustes, or a screen's or
+       * panel's `settings` node); back toward the default never asks. A wrong code or Cancelar keeps the old value; you never see
+       * the code. Your own writes may only move it toward the default (an answer's `config` or an action's `setSettings` away
+       * from it is refused), and no field may `bind` it: show it with `{ type: "settings", keys: ["<key>"] }`. The value syncs
+       * like any setting; the code is asked on each device at the moment of the change.
+       */
+      unlockWith?: "adultCode";
     }
   | KinoLinkSetting
   | KinoHelpSetting;

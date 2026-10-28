@@ -1,11 +1,11 @@
-# Fiesta
+# Party Chat
 
 [English](README.md) · [Para desarrolladores (en inglés)](DEVELOPERS.md)
 
-<img src="icon.png" width="96" alt="Ícono de Fiesta" align="right">
+<img src="icon.png" width="96" alt="Ícono de Party Chat" align="right">
 
 Un plugin de [Kino](https://github.com/kinotvapp/kino-light) para **ver juntos**, cada quien en su aparato: una pestaña
-**Fiesta** en el reproductor con chat, ocho reacciones rápidas y el video al mismo paso que el del anfitrión. La sala vive
+**Party Chat** en el reproductor con chat, ocho reacciones rápidas y el video al mismo paso que el del anfitrión. La sala vive
 en el aparato de quien la crea y se llega a ella por el túnel propio de Kino. No hay cuenta ni registro. El único servicio
 de afuera es un pequeño servicio de códigos cortos del autor del plugin (mira [Privacidad y seguridad](#privacidad-y-seguridad)).
 
@@ -24,7 +24,7 @@ de afuera es un pequeño servicio de códigos cortos del autor del plugin (mira 
 ## Capturas
 
 <!-- Por capturar antes de publicar, en screenshots/:
-  1-home-phone.jpg       la pestaña Fiesta antes de crear la sala (Crear sala, Unirme a sala)
+  1-home-phone.jpg       la pestaña Party Chat antes de crear la sala (Crear sala, Unirme a sala)
   2-join-code-phone.jpg  el paso para unirse: Código de la sala (5 números) y Siguiente
   3-room-phone.jpg       la pestaña Sala del anfitrión: «Sala: 41 408» con el ícono de copiar, personas, QR
   4-chat-phone.jpg       el chat con burbujas, una reacción y el campo con su ícono de enviar
@@ -40,9 +40,9 @@ Kino más viejo dice «Este plugin necesita una versión más nueva de Kino».
 1. En el celular, abre **Menú ▸ Plugins** y toca **+** (Agregar plugin). En la TV, abre **Plugins** y elige **Agregar
    plugin**.
 2. Deja el tipo en **Kino**. En **Dirección del plugin**, escribe `kinotvapp/kino-plugin-watch-party` y toca **Agregar**.
-3. Kino muestra **Instalar Fiesta**. Toca **Ver detalles**, lee las líneas (abajo te explicamos cada una) y toca
+3. Kino muestra **Instalar Party Chat**. Toca **Ver detalles**, lee las líneas (abajo te explicamos cada una) y toca
    **Instalar**.
-4. Reproduce cualquier título de cualquier plugin y abre el panel del reproductor: ahí está la pestaña **Fiesta**.
+4. Reproduce cualquier título de cualquier plugin y abre el panel del reproductor: ahí está la pestaña **Party Chat**.
 
 Todas las personas de la fiesta necesitan el plugin instalado. Está **firmado por su autor** («Firmado por su autor» en la
 hoja de instalación): Kino comprueba que cada actualización venga firmada con la misma clave.
@@ -62,7 +62,7 @@ mismo plugin quiere decir el mismo corte y el mismo archivo, así las posiciones
 
 ## Organizar una fiesta
 
-1. Reproduce el título, abre el panel y la pestaña **Fiesta**, y toca **Crear sala**. La primera vez te pregunta
+1. Reproduce el título, abre el panel y la pestaña **Party Chat**, y toca **Crear sala**. La primera vez te pregunta
    **¿Cómo te llamas?** (lo que ven los demás) y lo recuerda.
 2. Abrir una sala tarda unos segundos. La sala abre en el chat, y la pestaña **Sala** empieza con una línea:
    **Sala: 41 408**.
@@ -73,11 +73,11 @@ mismo plugin quiere decir el mismo corte y el mismo archivo, así las posiciones
 La invitación es texto plano, sin ningún enlace, por ejemplo:
 
 ```
-Únete a mi fiesta en Kino 🎬
+Únete a mi Party Chat en Kino 🎬
 Película: Dune (2021), con «Mi plugin»
 Código: 41408
-En Kino: reproduce el mismo título ▸ panel ▸ Fiesta ▸ Unirme.
-(Join my Kino watch party: code above.)
+En Kino: reproduce el mismo título ▸ panel ▸ Party Chat ▸ escribe el código ▸ Entrar.
+(Join my Kino Party Chat: type the code above in Kino.)
 ```
 
 Lleva el título con su año (y la temporada y el episodio), el nombre del plugin y el código. Nada más: ni la dirección de
@@ -90,7 +90,7 @@ la sala y su código de 12 números para **Entrar con palabras y código**.
 
 ## Unirse a una fiesta
 
-1. Reproduce **el mismo título con el mismo plugin**, abre el panel y la pestaña **Fiesta**, y toca **Unirme a sala**.
+1. Reproduce **el mismo título con el mismo plugin**, abre el panel y la pestaña **Party Chat**, y toca **Unirme a sala**.
 2. Escribe el **Código de la sala** (5 números; los espacios y guiones no importan) y toca **Siguiente**. Primero se
    revisa el código; después, la primera vez, te pregunta tu nombre.
 3. Otras formas de entrar, desde el mismo paso: **Pegar invitación** y **Escanear QR** en el celular, **Vincular con mi
@@ -125,7 +125,7 @@ aunque la app de chat la haya cambiado: negritas, emojis, saltos de línea o nú
 
 ## Celular + TV
 
-En la TV, abre la pestaña **Fiesta**, toca **Unirme a sala** y elige **Vincular con mi teléfono**. La TV muestra un código
+En la TV, abre la pestaña **Party Chat**, toca **Unirme a sala** y elige **Vincular con mi teléfono**. La TV muestra un código
 QR que sirve una sola vez y por 5 minutos. En el celular, dentro de la sala, toca **Agregar dispositivo** y escanea el
 código de **tu propia** TV. La TV entra con una pulsación: reproduce el video, sigue al anfitrión, muestra el chat y puede
 enviar las ocho reacciones (escribir queda en el celular). La lista de personas te muestra una sola vez, con 📱 📺. Si el
@@ -149,7 +149,7 @@ Lo que Kino muestra al instalar, y qué quiere decir cada línea aquí:
 | Kino dice | Qué quiere decir para este plugin |
 | --- | --- |
 | **Su pestaña en el reproductor verá lo que estás viendo (título, año, identificadores y posición) mientras la tengas abierta, y podrá enviarlo a sus servicios** (en rojo) | La pestaña lee el título que reproduces, su año, sus identificadores de TMDB/IMDb y tu posición, solo mientras está abierta. Los envía a **las personas de tu sala** (el título de la sala y la posición del anfitrión), para que todos vean lo mismo al mismo paso. Interruptor: **Mostrar en el reproductor**. |
-| **Podrá pausar, reanudar y mover tu video por sí solo** (en rojo) | La pestaña de un invitado sigue al anfitrión: pausa, reanuda, salta y cambia la velocidad. Kino anuncia cada una de esas acciones («Fiesta: pausado»), las ignora mientras adelantas o hay un diálogo de Kino abierto, y permite como máximo 30 por minuto. Solo los mensajes del anfitrión mueven el video de alguien. Interruptor: **Dejar que pause y mueva mi video** (sin él puedes seguir chateando). |
+| **Podrá pausar, reanudar y mover tu video por sí solo** (en rojo) | La pestaña de un invitado sigue al anfitrión: pausa, reanuda, salta y cambia la velocidad. Kino anuncia cada una de esas acciones («Party Chat: pausado»), las ignora mientras adelantas o hay un diálogo de Kino abierto, y permite como máximo 30 por minuto. Solo los mensajes del anfitrión mueven el video de alguien. Interruptor: **Dejar que pause y mueva mi video** (sin él puedes seguir chateando). |
 | **Podrá abrir una sala a la que se entra por internet a través de este aparato, y enviar los mensajes de la sala a quienes entren** (en rojo) | **Crear sala** abre una sala en tu aparato, a la que se llega por el túnel de Kino, y el chat, el título y la reproducción van a quienes entren. Unirse a la sala de otra persona pasa por la suya. Una sala se abre o se une solo cuando tocas un botón. Interruptor: **Dejar que abra salas por internet**. |
 | (sin línea) escanear con la cámara | **Escanear QR** y **Agregar dispositivo** abren **el escáner propio de Kino**, solo cuando los tocas; el plugin recibe solo el texto del código. |
 | El sitio `url-code.kinotv.workers.dev` | El servicio de códigos cortos, la única dirección a la que llega el plugin (mira abajo). |
@@ -200,7 +200,7 @@ Cada permiso en rojo se puede apagar después en la pestaña del plugin en Ajust
 - **«El anfitrión no responde»**: puede ser tu conexión o la suya. **Reintentar** prueba primero con el anfitrión y solo
   después con las puertas de respaldo.
 - **La fiesta se detuvo al cerrar el panel**: fija el panel (mira arriba).
-- **«La Fiesta necesita las pantallas de plugins activas en Ajustes»**: activa las pantallas de plugins en Ajustes de Kino.
+- **«Party Chat necesita las pantallas de plugins activas en Ajustes»**: activa las pantallas de plugins en Ajustes de Kino.
 
 ## Licencia
 
