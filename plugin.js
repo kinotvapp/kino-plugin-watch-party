@@ -1983,8 +1983,9 @@ function shownBusy(n) {
 }
 function addWaitRows(node, labelFor, seen = /* @__PURE__ */ new Set()) {
   if (!isObj(node)) return node;
-  const kids = Array.isArray(node.children) ? node.children : null;
-  if (!kids) return node;
+  const field = Array.isArray(node.children) ? "children" : Array.isArray(node.items) ? "items" : null;
+  if (!field) return node;
+  const kids = node[field];
   const inRow = node.type === "Row";
   const out = [];
   for (const c of kids) {
@@ -1998,7 +1999,7 @@ function addWaitRows(node, labelFor, seen = /* @__PURE__ */ new Set()) {
       out.push(waitRow(b.key, labelFor(b.event)));
     }
   }
-  return { ...node, children: out };
+  return { ...node, [field]: out };
 }
 
 // src/ui/link-qr.js
@@ -2461,7 +2462,7 @@ function bubble(e, mine, tv) {
   };
 }
 var localAt = (p, e) => e.at + (p.role === "guest" ? skewOf(p.skew || []) : 0);
-function chatList(p, now, ctx) {
+function chatList(p, now, ctx, lead = []) {
   const entries = p.hist.slice(-(isTv(ctx) ? LIMITS.shownTv : LIMITS.shown));
   const groups = [];
   for (const e of entries) {
@@ -2500,14 +2501,16 @@ function chatList(p, now, ctx) {
   p.notes.filter((n) => now - n.at < 2e4).slice(-2).forEach((n, i) => {
     items.push(Text(both(n.es, n.en), { key: "note" + i, style: "caption", color: "muted", fill: true, crossAxisAlignment: "center" }));
   });
-  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, newItemsHint: true, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
+  const empty = items.length === 0;
+  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, newItemsHint: true, gap: 8, items: [...lead, ...empty ? [Text(tx("empty"), { key: "empty", color: "muted" })] : [], ...items] };
 }
-function chatTab(p, now, ctx) {
+function chatTab(p, now, ctx, head) {
   const display = p.me.role === "display";
   const children = [];
-  if (p.stuck) children.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
-  else if (p.correctedTo !== null && now - p.correctedAt < 8e3) children.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
-  children.push(chatList(p, now, ctx));
+  const lead = [...head || []];
+  if (p.stuck) lead.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
+  else if (p.correctedTo !== null && now - p.correctedAt < 8e3) lead.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
+  children.push(chatList(p, now, ctx, lead));
   const glyphs = (close) => ({
     type: "Row",
     wrap: true,
@@ -2739,7 +2742,7 @@ function view(p, ctx, now, player = null) {
     // The chat fills the panel: the messages take the room left and the input row stays at the bottom (above the keyboard).
     // The Sala tab scrolls as usual.
     ...tab === "chat" ? { layout: "fill" } : {},
-    root: { type: "Column", gap: 8, padding: 8, children: [...top, ...head, ...tab === "room" ? roomTab(p, ctx) : chatTab(p, now, ctx)] }
+    root: { type: "Column", gap: 8, padding: 8, children: [...top, ...tab === "room" ? [...head, ...roomTab(p, ctx)] : chatTab(p, now, ctx, head)] }
   });
 }
 function headerRow(p, ctx) {

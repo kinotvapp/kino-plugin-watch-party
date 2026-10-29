@@ -39,7 +39,7 @@ const localAt = (p, e) => e.at + (p.role === "guest" ? skewOf(p.skew || []) : 0)
  * «↓ Nuevos» when the person reads older lines); then this device's messages still on their way, and the recent room notes
  * as small centred lines.
  */
-function chatList(p, now, ctx) {
+function chatList(p, now, ctx, lead = []) {
   const entries = p.hist.slice(-(isTv(ctx) ? LIMITS.shownTv : LIMITS.shown));
   const groups = [];
   for (const e of entries) {
@@ -70,7 +70,11 @@ function chatList(p, now, ctx) {
   p.notes.filter((n) => now - n.at < 20000).slice(-2).forEach((n, i) => {
     items.push(Text(both(n.es, n.en), { key: "note" + i, style: "caption", color: "muted", fill: true, crossAxisAlignment: "center" }));
   });
-  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, newItemsHint: true, gap: 8, items, empty: Text(tx("empty"), { color: "muted" }) };
+  // The header, banners and captions ride at the top of the list, not above it: with the keyboard up the panel is short, and a
+  // fixed child that reaches the body's bottom makes Kino flip between the fill and scroll layouts (the input jumps, the
+  // keyboard closes and opens again). The input row is the only fixed child left.
+  const empty = items.length === 0;
+  return { type: "ListView", key: "chat", flex: 1, stickToBottom: true, newItemsHint: true, gap: 8, items: [...lead, ...(empty ? [Text(tx("empty"), { key: "empty", color: "muted" })] : []), ...items] };
 }
 
 /**
@@ -78,12 +82,13 @@ function chatList(p, now, ctx) {
  * the 8 reactions (hidden until the emoji button opens them; they close after one is sent), and the input row: the text field,
  * the emoji button and «Enviar». A TV's display seat can only react: its reactions are shown directly, with no input row.
  */
-export function chatTab(p, now, ctx) {
+export function chatTab(p, now, ctx, head) {
   const display = p.me.role === "display";
   const children = [];
-  if (p.stuck) children.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
-  else if (p.correctedTo !== null && now - p.correctedAt < 8000) children.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
-  children.push(chatList(p, now, ctx));
+  const lead = [...(head || [])];
+  if (p.stuck) lead.push(Text(both("No logramos alcanzar al anfitrión: tu video tarda en cargar.", "We cannot catch up with the host: your video is slow to load."), { style: "caption", color: "warning" }));
+  else if (p.correctedTo !== null && now - p.correctedAt < 8000) lead.push(Text(both(`Ajustado al anfitrión: ${clockText(p.correctedTo)}`, `Moved to the host: ${clockText(p.correctedTo)}`), { style: "caption", color: "muted" }));
+  children.push(chatList(p, now, ctx, lead));
   // The reactions: each a pressable card around a large glyph (h3; h4 on a TV), at least 48 dp tall, two lines of four. The
   // index travels in the action itself (with an action object Kino reads `arg` from it, never from the node). A TV's display
   // seat (no input, reactions are all it sends) shows them in place; everyone else gets them as a popover over the input row,

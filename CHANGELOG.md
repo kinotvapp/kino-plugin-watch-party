@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+- **The chat no longer fights the keyboard.** On a phone, opening the keyboard in the chat made the input jump up and down and
+  the keyboard open and close by itself. The header, the banners and the status lines now ride at the top of the message list
+  instead of above it, so the input row is the chat's only fixed part: with the keyboard up the panel is short, and a fixed
+  header used to make Kino flip between its fill and scroll layouts (rebuilding the field, which lost focus).
+
 ## 1.1.1
 
 - `plugin.js` is now generated from `src/`, same behaviour: the code is split into small files by responsibility under `src/` and `npm run build` (esbuild) bundles them into the one file Kino installs. `npm run check:built` proves the shipped file is built from the source.

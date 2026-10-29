@@ -85,8 +85,10 @@ function shownBusy(n) {
  */
 export function addWaitRows(node, labelFor, seen = new Set()) {
   if (!isObj(node)) return node;
-  const kids = Array.isArray(node.children) ? node.children : null;
-  if (!kids) return node;
+  // A list's items (the chat's header and banners ride there) are laid out like children: their progress rows go right after them.
+  const field = Array.isArray(node.children) ? "children" : Array.isArray(node.items) ? "items" : null;
+  if (!field) return node;
+  const kids = node[field];
   const inRow = node.type === "Row";
   const out = [];
   for (const c of kids) {
@@ -100,5 +102,5 @@ export function addWaitRows(node, labelFor, seen = new Set()) {
       out.push(waitRow(b.key, labelFor(b.event)));
     }
   }
-  return { ...node, children: out };
+  return { ...node, [field]: out };
 }

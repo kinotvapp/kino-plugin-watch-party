@@ -53,7 +53,7 @@ async function P() {
 
 // ---------- the tree helpers ----------
 
-const all = (n) => [n, ...childNodes(n).flatMap(all)];
+const all = (n) => [n, ...childNodes(n).flatMap(all), ...(Array.isArray(n && n.items) ? n.items.flatMap(all) : [])];
 const texts = (root) => all(root).flatMap((n) => [n.text, n.label, n.title].filter((x) => typeof x === "string"));
 const ofType = (root, type) => all(root).filter((n) => n.type === type);
 /** A raw chat ListView's bubbles in order: { mine, text } (a card's text, or a reaction's glyph). */
@@ -411,7 +411,7 @@ test("two members: chat both ways with the host's numbers, reactions, the 8-emoj
   // The tab: bubbles of plain text (no link, no image), and the guest's own pending messages, marked «Enviando…».
   const { raw, panel: shown } = await panel(bea, t + 6100);
   const list = rawChat(raw);
-  assert.ok(all({ children: list.items }).every((n) => [undefined, "Column", "Card", "Text"].includes(n.type)));
+  assert.ok(all({ children: list.items.filter((n) => /^(g\d|pending$|note)/.test(n.key || "")) }).every((n) => [undefined, "Column", "Card", "Text"].includes(n.type)));
   assert.equal(list.items.at(-1).key, "pending");
   assert.ok(texts(shown.root).includes("Enviando…"));
 });
@@ -1358,7 +1358,7 @@ test("the Sala tab opens with one line «Sala: 41 408» (copy icon at its end on
     const { raw } = await panel(host, t);
     assert.equal(copyNodes(raw.root).length, 0, `${kind}: no copy in the chat`);
     assert.ok(!/Sala abierta|Room open/.test(JSON.stringify(raw)));
-    assert.equal(raw.root.children.find((n) => n.key === "chat").items.length, 0);
+    assert.ok(raw.root.children.find((n) => n.key === "chat").items.every((n) => !/^g\d|^pending$/.test(n.key || "")), "no bubbles yet");
     assert.ok(raw.root.children.some((n) => n.key === "inputRow"));
   }
   host.tab = "room";
@@ -1854,21 +1854,24 @@ test("room view: no «Party Chat» or room-name heading; a header row (status le
       const json = JSON.stringify(raw.root);
       assert.ok(!/"text":"(Party Chat|Fiesta|Sala de [^"]*)"/.test(json), "no redundant heading");
       const kids = raw.root.children;
-      const header = kids.find((n) => n.key === "headerRow");
+      // The header rides at the top of the chat list (never a fixed child: with the keyboard up a fixed header made the fill layout overflow).
+      const lead = kids.find((n) => n.key === "chat").items;
+      const header = lead.find((n) => n.key === "headerRow");
       assert.ok(header, "a header row");
       assert.equal(header.children[0].type, "Text");
       const sync = header.children.find((n) => n.key === "btnSync");
       if (d === bea) {
         assert.equal(header.children.at(-1), sync, "the sync icon on the right");
         assert.deepEqual([sync.type, sync.icon, sync.labelText, sync.labelTextEn], ["IconButton", "sync", "Sincronizar", "Sync"]);
-        assert.equal(kids[kids.indexOf(header) + 1].key, "busy.sync", "its progress row right under the header");
+        assert.equal(lead[lead.indexOf(header) + 1].key, "busy.sync", "its progress row right under the header");
       } else assert.equal(sync, undefined, "the host has nothing to sync to");
       // Order: messages, then the reactions' popover (it takes no room), then the input row: the field and the emoji toggle.
       const keys = kids.map((n) => n.key);
       const list = keys.indexOf("chat");
       const palette = keys.indexOf("emojiPalette");
       const input = keys.indexOf("inputRow");
-      assert.ok(list > keys.indexOf("headerRow") && list < palette && palette < input, keys.join(","));
+      assert.ok(list >= 0 && list < palette && palette < input, keys.join(","));
+      assert.deepEqual(kids.filter((n) => n.key !== "chat" && n.key !== "emojiPalette" && n.key !== "inputRow").map((n) => n.key), [], "the input row is the only fixed child");
       assert.deepEqual([kids[palette].type, kids[palette].anchor], ["BottomSheet", "emojiToggle"], "a popover anchored to the emoji button");
       const row = kids[input];
       assert.deepEqual(row.children.map((n) => n.key), ["chatText", "emojiToggle"], "the field (its send icon inside it) and the emoji toggle");

@@ -79,7 +79,7 @@ export function view(p, ctx, now, player = null) {
     // The chat fills the panel: the messages take the room left and the input row stays at the bottom (above the keyboard).
     // The Sala tab scrolls as usual.
     ...(tab === "chat" ? { layout: "fill" } : {}),
-    root: { type: "Column", gap: 8, padding: 8, children: [...top, ...head, ...(tab === "room" ? roomTab(p, ctx) : chatTab(p, now, ctx))] },
+    root: { type: "Column", gap: 8, padding: 8, children: [...top, ...(tab === "room" ? [...head, ...roomTab(p, ctx)] : chatTab(p, now, ctx, head))] },
   });
 }
 
