@@ -1,11 +1,11 @@
-// The short-code service (url-code.kinotv.workers.dev): the room's address, the 5-digit code, create, look up, revoke.
+// The short-code service (url-code.kinoverse.app): the room's address, the 5-digit code, create, look up, revoke.
 
 import { LIMITS } from "../limits.js";
 import { asciiDigits } from "../util/codes.js";
 import { isObj } from "../util/text.js";
 
 /** The service: POST `{ url }` -> `{ code, url, expires_in_seconds }`; GET `/<code>` -> the same, 404 for an unknown code. */
-export const SHORT_SERVICE = "https://url-code.kinotv.workers.dev/";
+export const SHORT_SERVICE = "https://url-code.kinoverse.app/";
 
 /** The room's own address as the short code stands for it (and as the QR carries it). */
 export function roomUrlOf(words, code) {

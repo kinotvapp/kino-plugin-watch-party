@@ -148,13 +148,13 @@ What Kino shows when you install, and what each line means here:
 | **Can pause, resume and move your video by itself** (in red) | A guest's tab follows the host: it pauses, resumes, jumps and sets the speed. Kino announces every such action ("Party Chat: paused"), ignores it while you seek or a Kino dialog is open, and allows at most 30 a minute. Only the host's messages move anyone's video. Switch: **Let it pause and move my video** (without it you can still chat). |
 | **Can open a room that people reach over the Internet through this device, and send the room's messages to whoever joins** (in red) | **Create room** opens a room on your device, reached through Kino's tunnel, and the chat, the title and the playback go to the people who join. Joining someone else's room goes through theirs. A room opens or joins only when you press a button. Switch: **Let it open rooms over the Internet**. |
 | (no line) camera scan | **Scan QR** and **Add device** open **Kino's own scanner**, only when you press them; the plugin gets only the text in the code. |
-| The host `url-code.kinotv.workers.dev` | The short-code service, the only address the plugin reaches (see below). |
+| The host `url-code.kinoverse.app` | The short-code service, the only address the plugin reaches (see below). |
 
 Each red permission can be switched off later in the plugin's tab in Kino's Settings, without uninstalling.
 
 ## Privacy and security
 
-- **The short-code service.** `url-code.kinotv.workers.dev` is run by the plugin's author.
+- **The short-code service.** `url-code.kinoverse.app` is run by the plugin's author.
   - **What it receives:** when you create a room, the host's device sends it the room's address (its words and its
     12-digit room code) and gets back a 5-digit code. A guest's device sends it the 5 digits and gets back that address.
   - **How long it keeps it:** a code lasts at most **8 hours**. When the host leaves the room, the plugin asks the

@@ -196,7 +196,7 @@ test("the manifest: a contributed tab with room, qrScan and playerControl; Kino 
   }
   assert.ok(r.consent.some((l) => /pausar, reanudar y mover/.test(l.text) && l.danger === true));
   // The only host it reaches is the short-code service.
-  assert.deepEqual(MANIFEST.hosts, ["url-code.kinotv.workers.dev"]);
+  assert.deepEqual(MANIFEST.hosts, ["url-code.kinoverse.app"]);
   assert.equal(MANIFEST.fetchHosts, undefined);
 });
 
@@ -1246,7 +1246,7 @@ test("the party room uses Kino's default 12-digit code (no codeDigits) and a 5-d
   const a = plain(await plugin.panelActionAt({ trigger: "press", name: "create", values: { myName: "Ana" } }, ctx, T0));
   assert.equal(asked[0].codeDigits, undefined, "the platform's default code");
   assert.equal(a.toast.text, "Sala creada: comparte el código 41 408");
-  assert.deepEqual(svc.calls.map((c) => [c.method, c.url, c.timeoutMs, c.redirect]), [["POST", "https://url-code.kinotv.workers.dev/", 5000, "manual"]]);
+  assert.deepEqual(svc.calls.map((c) => [c.method, c.url, c.timeoutMs, c.redirect]), [["POST", "https://url-code.kinoverse.app/", 5000, "manual"]]);
   assert.deepEqual(plain(svc.calls[0].body), { json: { url: "https://brave-river-cat-moon.trycloudflare.com/?c=123456789012" } });
   // On the fake network: the host shows the short code; a guest types it and joins; the TV link keeps its 12 digits.
   let { host, code, words, net, t } = await room(["Bea"]);
@@ -1402,9 +1402,9 @@ test("the kit and go.copy: until Task 8x lands it drops exactly the copy go of e
 
 // ---------- owner feedback from a real TV: no clipboard and no camera there ----------
 
-// ---------- the owner's short-code service (url-code.kinotv.workers.dev), used as it is today ----------
+// ---------- the owner's short-code service (url-code.kinoverse.app), used as it is today ----------
 
-const SVC = "https://url-code.kinotv.workers.dev/";
+const SVC = "https://url-code.kinoverse.app/";
 
 test("parseRoomUrl: only https://<words>.trycloudflare.com/?c=<4..12 digits>, strictly (a table of valid and hostile addresses)", async () => {
   const p = await P();

@@ -43,7 +43,7 @@ export function createNet() {
 }
 
 /**
- * The short-code service (url-code.kinotv.workers.dev) as it behaves today: POST `{ url }` -> 200 `{ code, url,
+ * The short-code service (url-code.kinoverse.app) as it behaves today: POST `{ url }` -> 200 `{ code, url,
  * expires_in_seconds }` (any URL accepted), GET `/<code>` -> 200 the same, an unknown code -> 404 JSON. `down` makes every
  * call fail like a network error; `answer` (optional) replaces the next answers for hostile tests; `calls` records them.
  */
@@ -58,14 +58,14 @@ export function createShortService() {
     svc.calls.push({ url, method: o.method || "GET", body: o.body, timeoutMs: o.timeoutMs, redirect: o.redirect });
     if (svc.down) { const e = new Error("network"); e.code = "network"; throw e; }
     if (svc.answer) return response(...svc.answer(url, o));
-    if (!String(url).startsWith("https://url-code.kinotv.workers.dev/")) { const e = new Error("host not declared"); e.code = "host_not_allowed"; throw e; }
+    if (!String(url).startsWith("https://url-code.kinoverse.app/")) { const e = new Error("host not declared"); e.code = "host_not_allowed"; throw e; }
     if ((o.method || "GET") === "POST") {
       const stored = o.body && o.body.json && o.body.json.url;
       const code = String(svc.next++);
       svc.codes.set(code, stored);
       return response(200, { code, url: stored, expires_in_seconds: 28800 });
     }
-    const code = String(url).slice("https://url-code.kinotv.workers.dev/".length);
+    const code = String(url).slice("https://url-code.kinoverse.app/".length);
     return svc.codes.has(code) ? response(200, { code, url: svc.codes.get(code), expires_in_seconds: 28800 }) : response(404, { error: "not found" });
   };
   return svc;

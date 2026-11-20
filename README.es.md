@@ -152,13 +152,13 @@ Lo que Kino muestra al instalar, y qué quiere decir cada línea aquí:
 | **Podrá pausar, reanudar y mover tu video por sí solo** (en rojo) | La pestaña de un invitado sigue al anfitrión: pausa, reanuda, salta y cambia la velocidad. Kino anuncia cada una de esas acciones («Party Chat: pausado»), las ignora mientras adelantas o hay un diálogo de Kino abierto, y permite como máximo 30 por minuto. Solo los mensajes del anfitrión mueven el video de alguien. Interruptor: **Dejar que pause y mueva mi video** (sin él puedes seguir chateando). |
 | **Podrá abrir una sala a la que se entra por internet a través de este aparato, y enviar los mensajes de la sala a quienes entren** (en rojo) | **Crear sala** abre una sala en tu aparato, a la que se llega por el túnel de Kino, y el chat, el título y la reproducción van a quienes entren. Unirse a la sala de otra persona pasa por la suya. Una sala se abre o se une solo cuando tocas un botón. Interruptor: **Dejar que abra salas por internet**. |
 | (sin línea) escanear con la cámara | **Escanear QR** y **Agregar dispositivo** abren **el escáner propio de Kino**, solo cuando los tocas; el plugin recibe solo el texto del código. |
-| El sitio `url-code.kinotv.workers.dev` | El servicio de códigos cortos, la única dirección a la que llega el plugin (mira abajo). |
+| El sitio `url-code.kinoverse.app` | El servicio de códigos cortos, la única dirección a la que llega el plugin (mira abajo). |
 
 Cada permiso en rojo se puede apagar después en la pestaña del plugin en Ajustes de Kino, sin desinstalarlo.
 
 ## Privacidad y seguridad
 
-- **El servicio de códigos cortos.** `url-code.kinotv.workers.dev` lo maneja el autor del plugin.
+- **El servicio de códigos cortos.** `url-code.kinoverse.app` lo maneja el autor del plugin.
   - **Qué recibe:** al crear una sala, el aparato del anfitrión le envía la dirección de la sala (sus palabras y su
     código de sala de 12 números) y recibe un código de 5 números. El aparato de un invitado le envía los 5 números y
     recibe esa dirección.

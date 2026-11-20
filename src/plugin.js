@@ -5,7 +5,7 @@
 //
 // - `kino.room` (capability `room`): a short-lived mailbox hosted on the person's own device and reached over the Internet
 //   through Kino's own tunnel. One person creates the room and is its HOST; the others join with the room's words and its
-//   12-digit code. People never handle them: the host asks the Kino author's short-code service (url-code.kinotv.workers.dev,
+//   12-digit code. People never handle them: the host asks the Kino author's short-code service (url-code.kinoverse.app,
 //   the only host this plugin reaches) for a 5-digit code that stands for `https://<words>.trycloudflare.com/?c=<code>`, and a
 //   guest types those 5 digits; the plugin reads the words and the code back out of that address (strictly) and never fetches
 //   it. The QR carries the same address, so a phone that scans it needs no service. Words + code stay as a fallback.

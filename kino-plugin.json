@@ -1,7 +1,7 @@
 {
   "id": "watch-party",
   "name": "Party Chat",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "apiVersion": 14,
   "entry": "plugin.js",
   "description": "Mira un título con tus amigos, cada quien en su aparato: una pestaña en el reproductor con chat, reacciones y el video sincronizado. Entra con un código de 5 números o con su QR. (Party Chat: watch a title together, with a chat and the video in sync.)",
@@ -13,7 +13,7 @@
     "utilities"
   ],
   "hosts": [
-    "url-code.kinotv.workers.dev"
+    "url-code.kinoverse.app"
   ],
   "capabilities": [
     "playerPanelTab",
@@ -33,6 +33,6 @@
   },
   "signature": {
     "authorKey": "82b87b938e0a95b142467c815a8823cb54310a13a828c3c4c77b1eda43294ae6",
-    "value": "00f8b697c3f726434295ca38a354a3bf8143c400e6dc9a01d86fe722d971bd99484be7e993d21c993de5db563198d4e18ea9a68f4316c0be81a5fd75758bf901"
+    "value": "f942b3876a615993370866d1652f1f3c88c10c10de967bce9af72b9bcfc0da660ef1a881e20b540acc23b7c370e4cf14b759398e90b4f5cef2847a6df09d4a07"
   }
 }

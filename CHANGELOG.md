@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3
+
+- **The short-code service moved off Cloudflare Workers.** The 5-digit join code is now minted by the author-run service at `url-code.kinoverse.app` (on the author's own server, behind a Cloudflare tunnel, rate-limited per IP) instead of `url-code.kinotv.workers.dev`; same wire contract, so joining and the QR work exactly as before. The plugin's one declared host is now `url-code.kinoverse.app`.
+
 ## 1.1.2
 
 - **The chat no longer fights the keyboard.** On a phone, opening the keyboard in the chat made the input jump up and down and

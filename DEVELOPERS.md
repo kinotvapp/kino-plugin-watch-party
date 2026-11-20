@@ -73,7 +73,7 @@ Ajustes. The plugin cannot word or hide them:
 - `room`: it opens a room that people reach over the Internet through this device, through Kino's own tunnel. The plugin
   never sees a URL, only the words and the code.
 - `qrScan`: Kino's own scanner opens only when the person presses a button; the plugin gets only the decoded text.
-- The declared host `url-code.kinotv.workers.dev` (the short-code service): listed in Kino's sheet with the other hosts. The
+- The declared host `url-code.kinoverse.app` (the short-code service): listed in Kino's sheet with the other hosts. The
   plugin reaches no other address (no `fetchHosts: "any"`), and never the room address the service returns.
 
 ### What the code protects, and what it does not

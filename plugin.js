@@ -271,7 +271,7 @@ var asciiDigits = (s) => Array.from(s).map((ch) => {
 var digitsOnly = (s) => s.replace(/[^0-9]/g, "");
 
 // src/invite/short-code.js
-var SHORT_SERVICE = "https://url-code.kinotv.workers.dev/";
+var SHORT_SERVICE = "https://url-code.kinoverse.app/";
 function roomUrlOf(words, code) {
   return `https://${words}.trycloudflare.com/?c=${code}`;
 }
